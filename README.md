@@ -36,7 +36,7 @@ A rule-based trading assistant that connects to Interactive Brokers, monitors re
 ```bash
 # Clone the repo
 git clone <your-repo-url>
-cd ib-trading-assistant
+cd sentinel-trader
 
 # Backend
 python -m venv venv
@@ -54,7 +54,7 @@ npm run dev                   # http://localhost:5173
 ## Project Structure
 
 ```
-ib-trading-assistant/
+sentinel-trader/
 ├── src/
 │   ├── api/            # FastAPI routes and schemas
 │   ├── core/           # IB connection and account data
