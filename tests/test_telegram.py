@@ -36,7 +36,7 @@ async def main():
 
     # 1. Plain message
     logger.info("Sending plain test message...")
-    ok = await notifier.send_message("✅ IB Trading Assistant — Telegram connection test successful!")
+    ok = await notifier.send_message("✅ SentinelTrader — Telegram connection test successful!")
     if not ok:
         logger.error("Plain message failed. Check token and chat_id.")
         sys.exit(1)
