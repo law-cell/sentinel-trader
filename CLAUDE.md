@@ -1,4 +1,4 @@
-# IB Trading Assistant - Project Context
+# SentinelTrader - Project Context
 
 ## Project Overview
 Trading assistant that connects to Interactive Brokers to execute custom trading rules, monitor signals, and manage positions.

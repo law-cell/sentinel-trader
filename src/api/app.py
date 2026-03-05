@@ -1,7 +1,7 @@
 """
 FastAPI Application
 ===================
-Main entry point for the IB Trading Assistant REST API.
+Main entry point for the SentinelTrader REST API.
 
 Startup sequence:
     1. Connect to IB TWS
@@ -81,9 +81,9 @@ async def lifespan(app: FastAPI):
 # ─── App ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="IB Trading Assistant API",
+    title="SentinelTrader API",
     description=(
-        "REST API for the IB Trading Assistant.\n\n"
+        "REST API for SentinelTrader.\n\n"
         "Manage rules, monitor your account, and view live market data."
     ),
     version="0.1.0",

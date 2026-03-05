@@ -1,7 +1,7 @@
 """
 API Server Launcher
 ===================
-Starts the IB Trading Assistant FastAPI server.
+Starts the SentinelTrader FastAPI server.
 
 Usage:
     python run_api.py

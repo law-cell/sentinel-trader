@@ -26,7 +26,7 @@ export default function TopBar() {
     >
       <Activity size={20} style={{ color: 'var(--green)' }} />
       <span className="font-bold text-base tracking-tight" style={{ color: 'var(--text)' }}>
-        IB Trading Assistant
+        SentinelTrader
       </span>
       <div className="ml-auto flex items-center gap-2">
         <span

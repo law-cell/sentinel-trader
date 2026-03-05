@@ -11,7 +11,7 @@ Setup:
 
 Usage:
     notifier = TelegramNotifier(token="...", chat_id="...")
-    await notifier.send_message("Hello from IB Trading Assistant!")
+    await notifier.send_message("Hello from SentinelTrader!")
     await notifier.send_alert("NVDA Alert", "NVDA", "price > 150", 180.05)
 """
 
