@@ -1,0 +1,37 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+*.db
+logs/
+
+# Node / Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+
+# IDE / Tools
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# IB
+*.ibc
