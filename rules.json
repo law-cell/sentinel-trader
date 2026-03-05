@@ -1,0 +1,46 @@
+[
+  {
+    "name": "NVDA Price Alert - Breakout Above 150",
+    "symbol": "NVDA",
+    "condition": {
+      "type": "price_above",
+      "threshold": 190
+    },
+    "action": "telegram",
+    "cooldown": 300,
+    "enabled": true
+  },
+  {
+    "name": "NVDA Intraday Swing > 3%",
+    "symbol": "NVDA",
+    "condition": {
+      "type": "price_change_pct",
+      "threshold": 3.0
+    },
+    "action": "telegram",
+    "cooldown": 600,
+    "enabled": true
+  },
+  {
+    "name": "SPY High Volume Alert",
+    "symbol": "SPY",
+    "condition": {
+      "type": "volume_above",
+      "threshold": 50000000
+    },
+    "action": "telegram",
+    "cooldown": 900,
+    "enabled": true
+  },
+  {
+    "name": "TSLA Price Drop Below 200",
+    "symbol": "TSLA",
+    "condition": {
+      "type": "price_below",
+      "threshold": 200.0
+    },
+    "action": "telegram",
+    "cooldown": 300,
+    "enabled": true
+  }
+]
