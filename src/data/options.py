@@ -175,7 +175,7 @@ async def main():
 
     try:
         ib = await conn.connect()
-        ib.reqMarketDataType(3)
+        ib.reqMarketDataType(1)
 
         # Step 1: Get available chains
         chain = await get_option_chains(ib, symbol)

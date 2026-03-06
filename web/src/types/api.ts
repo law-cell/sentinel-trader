@@ -20,6 +20,13 @@ export interface PositionResponse {
   avg_cost: number | null
 }
 
+export interface SymbolSearchResult {
+  symbol: string
+  name: string
+  sec_type: string
+  exchange: string
+}
+
 export interface MarketDataResponse {
   symbol: string
   bid: number | null

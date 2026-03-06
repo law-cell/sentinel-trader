@@ -11,7 +11,7 @@ Usage:
 
 import asyncio
 from datetime import datetime
-from ib_async import IB, Stock, Ticker, util
+from ib_async import IB, Stock, Ticker
 from loguru import logger
 from src.core.connection import IBConnection
 from src.config.settings import WATCHLIST
@@ -98,25 +98,19 @@ def print_quotes(snapshots: list[dict]):
 async def main():
     """
     Subscribe to watchlist and print live quotes every 3 seconds for 30 seconds.
-    This demonstrates the real-time data feed is working.
     """
     conn = IBConnection()
 
     try:
         ib = await conn.connect()
-
-        # Use delayed data if you don't have a market data subscription
-        # Comment out the next line if you have real-time data
-        ib.reqMarketDataType(3)  # 3 = Delayed, 1 = Real-time
+        ib.reqMarketDataType(1)  # 3 = Delayed, 1 = Real-time
 
         stream = MarketDataStream(ib)
         await stream.subscribe(WATCHLIST)
 
-        # Wait a bit for initial data to arrive
         logger.info("Waiting for market data...")
         await asyncio.sleep(3)
 
-        # Print quotes every 3 seconds for 30 seconds
         for i in range(10):
             snapshots = stream.get_snapshot()
             print_quotes(snapshots)

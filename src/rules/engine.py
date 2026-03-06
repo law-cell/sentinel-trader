@@ -201,7 +201,7 @@ async def main(rules_path: str, symbols: list[str]):
     conn = IBConnection()
     try:
         ib = await conn.connect()
-        ib.reqMarketDataType(3)
+        ib.reqMarketDataType(1)
         await engine.run(ib, watch)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
