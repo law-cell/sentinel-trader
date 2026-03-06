@@ -7,13 +7,20 @@ Endpoints:
     GET /api/account              — account summary (NetLiq, BuyingPower, etc.)
     GET /api/positions            — current open positions
     GET /api/market-data/{symbol} — live ticker snapshot for a subscribed symbol
+    GET /api/search/{query}       — search IB symbol database (reqMatchingSymbols)
 """
 
+import asyncio
 import math
 from fastapi import APIRouter, HTTPException, Request
 
 from src.core.account import get_account_summary, get_positions
-from src.api.schemas import AccountSummaryResponse, PositionResponse, MarketDataResponse
+from src.api.schemas import (
+    AccountSummaryResponse,
+    PositionResponse,
+    MarketDataResponse,
+    SymbolSearchResult,
+)
 
 router = APIRouter(prefix="/api", tags=["account"])
 
@@ -77,25 +84,68 @@ async def get_positions_endpoint(request: Request):
     ]
 
 
+# ─── Symbol search ────────────────────────────────────────────────────────────
+
+@router.get("/search/{query}", response_model=list[SymbolSearchResult])
+async def search_symbols(request: Request, query: str):
+    """
+    Search IB's symbol database using reqMatchingSymbols.
+    Returns up to 16 matches (IB hard limit) filtered to equities / ETFs.
+    """
+    ib = _check_ib(request)
+    if len(query.strip()) < 1:
+        return []
+
+    matches = await ib.reqMatchingSymbolsAsync(query.strip())
+    if not matches:
+        return []
+
+    results: list[SymbolSearchResult] = []
+    for desc in matches:
+        c = desc.contract
+        if c.currency != "USD" or c.secType not in ("STK",):
+            continue
+        results.append(SymbolSearchResult(
+            symbol=c.symbol,
+            name=c.description or "",
+            sec_type=c.secType,
+            exchange=c.primaryExchange or c.exchange or "",
+        ))
+
+    return results
+
+
 # ─── Market data snapshot ─────────────────────────────────────────────────────
 
 @router.get("/market-data/{symbol}", response_model=MarketDataResponse)
 async def get_market_data(request: Request, symbol: str):
     """
-    Return the latest tick snapshot for a subscribed symbol.
-    Only symbols with at least one active rule are subscribed.
+    Return the latest tick snapshot for a symbol.
+    If the symbol is not yet subscribed, dynamically subscribe and wait 2 s for
+    initial data to arrive before responding.
     """
+    sym = symbol.upper()
+    ib = _check_ib(request)
     engine = request.app.state.engine
-    ticker = engine.get_ticker(symbol.upper())
+    ticker = engine.get_ticker(sym)
+
+    if ticker is None:
+        if engine._stream is None:
+            from src.data.market_data import MarketDataStream
+            engine._stream = MarketDataStream(ib)
+
+        await engine.subscribe_symbol(sym)
+        await asyncio.sleep(2)
+        ticker = engine.get_ticker(sym)
 
     if ticker is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"'{symbol.upper()}' is not subscribed. Add a rule for this symbol first.",
+            status_code=503,
+            detail=f"Could not obtain market data for '{sym}'. IB may have rejected the subscription.",
         )
 
     return MarketDataResponse(
-        symbol=symbol.upper(),
+        symbol=sym,
         bid=_safe_float(ticker.bid),
         ask=_safe_float(ticker.ask),
         last=_safe_float(ticker.last),

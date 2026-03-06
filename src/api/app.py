@@ -41,7 +41,10 @@ async def lifespan(app: FastAPI):
     ib = None
     try:
         ib = await conn.connect()
-        ib.reqMarketDataType(3)  # fallback to delayed data
+        # Type 1 = real-time (requires Master Client ID = IB_CLIENT_ID in TWS API settings)
+        # Type 3 = delayed  (free, no subscription needed)
+        # Type 4 = frozen   (last snapshot, works even with competing live session)
+        ib.reqMarketDataType(1)
         logger.info("IB connected")
     except Exception as e:
         logger.error(f"IB connection failed: {e} — account/market-data endpoints will return 503")

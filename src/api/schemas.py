@@ -69,6 +69,15 @@ class TriggerEvent(BaseModel):
     price: float
 
 
+# ─── Symbol search ────────────────────────────────────────────────────────────
+
+class SymbolSearchResult(BaseModel):
+    symbol: str
+    name: str
+    sec_type: str
+    exchange: str
+
+
 # ─── Account ──────────────────────────────────────────────────────────────────
 
 class AccountSummaryResponse(BaseModel):

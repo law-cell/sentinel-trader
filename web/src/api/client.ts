@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { AccountSummaryResponse, PositionResponse, TriggerEvent, RuleResponse } from '../types/api'
+import type { AccountSummaryResponse, PositionResponse, TriggerEvent, RuleResponse, MarketDataResponse, SymbolSearchResult } from '../types/api'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -35,6 +35,16 @@ export async function updateRule(name: string, payload: object): Promise<RuleRes
 
 export async function deleteRule(name: string): Promise<void> {
   await api.delete(`/rules/${encodeURIComponent(name)}`)
+}
+
+export async function fetchMarketData(symbol: string): Promise<MarketDataResponse> {
+  const { data } = await api.get<MarketDataResponse>(`/market-data/${encodeURIComponent(symbol)}`)
+  return data
+}
+
+export async function searchSymbols(query: string): Promise<SymbolSearchResult[]> {
+  const { data } = await api.get<SymbolSearchResult[]>(`/search/${encodeURIComponent(query)}`)
+  return data
 }
 
 export async function checkHealth(): Promise<boolean> {
