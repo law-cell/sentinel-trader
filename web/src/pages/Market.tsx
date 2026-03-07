@@ -303,7 +303,13 @@ function TickerCard({ symbol, onRemove }: TickerCardProps) {
   const prevLastRef = useRef<number | null>(null)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const load = useCallback(async () => {
+    if (retryTimer.current) {
+      clearTimeout(retryTimer.current)
+      retryTimer.current = null
+    }
     try {
       const data = await fetchMarketData(symbol)
       const prevLast = prevLastRef.current
@@ -321,6 +327,10 @@ function TickerCard({ symbol, onRemove }: TickerCardProps) {
           600,
         )
       }
+      // If subscription just started and tick data isn't ready yet, retry in 2s
+      if (newLast == null) {
+        retryTimer.current = setTimeout(load, 2000)
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to fetch'
       setState(prev => ({ ...prev, error: msg, loading: false }))
@@ -333,6 +343,7 @@ function TickerCard({ symbol, onRemove }: TickerCardProps) {
     return () => {
       clearInterval(id)
       if (flashTimer.current) clearTimeout(flashTimer.current)
+      if (retryTimer.current) clearTimeout(retryTimer.current)
     }
   }, [load])
 

@@ -24,6 +24,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from src.core.connection import IBConnection
@@ -32,6 +34,7 @@ from src.api.routes import rules as rules_router
 from src.api.routes import account as account_router
 
 RULES_FILE = Path("rules.json")
+STATIC_DIR = Path("web/dist")
 
 
 @asynccontextmanager
@@ -65,6 +68,16 @@ async def lifespan(app: FastAPI):
     app.state.conn = conn
     app.state.engine = engine
     app.state.engine_task = engine_task
+
+    # Register reconnect callback — runs after each successful reconnect
+    async def on_reconnect(ib_instance) -> None:
+        ib_instance.reqMarketDataType(1)
+        logger.info("Reconnect callback: set market data type to real-time")
+        if engine._stream is not None:
+            await engine._stream.resubscribe_all()
+            logger.info("Reconnect callback: resubscribed all market data streams")
+
+    conn.set_reconnect_callback(on_reconnect)
 
     logger.info("API server ready")
     yield  # ── Serving requests ──────────────────────────────────────────────
@@ -105,7 +118,30 @@ app.include_router(rules_router.router)
 app.include_router(account_router.router)
 
 
-@app.get("/", tags=["health"])
+@app.get("/api/health", tags=["health"])
 async def health():
-    """Health check — also confirms the server is running."""
-    return {"status": "ok", "docs": "/docs"}
+    """Health check — returns IB connection status and subscribed symbols."""
+    ib = getattr(app.state, "ib", None)
+    ib_connected = bool(ib and ib.isConnected())
+    engine = getattr(app.state, "engine", None)
+    subscribed = list(engine._stream.subscriptions.keys()) if (engine and engine._stream) else []
+    return {
+        "status": "ok",
+        "ib_connected": ib_connected,
+        "subscribed_symbols": subscribed,
+    }
+
+
+# ─── Production static file serving ──────────────────────────────────────────
+# Only active when web/dist exists (i.e. inside the Docker image).
+# In development, Vite's dev server handles the frontend on port 5173.
+
+if STATIC_DIR.exists():
+    # Serve built JS/CSS/image assets
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="static-assets")
+
+    # SPA catch-all: any path not matched by an API route returns index.html.
+    # Must be registered LAST so API routes take priority.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        return FileResponse(STATIC_DIR / "index.html")

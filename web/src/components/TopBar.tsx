@@ -2,22 +2,33 @@ import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import axios from 'axios'
 
+type Status = 'checking' | 'api_down' | 'ib_disconnected' | 'connected'
+
 export default function TopBar() {
-  const [connected, setConnected] = useState<boolean | null>(null)
+  const [status, setStatus] = useState<Status>('checking')
 
   useEffect(() => {
     const check = async () => {
       try {
-        await axios.get('/')
-        setConnected(true)
+        const res = await axios.get<{ ib_connected: boolean }>('/api/health')
+        setStatus(res.data.ib_connected ? 'connected' : 'ib_disconnected')
       } catch {
-        setConnected(false)
+        setStatus('api_down')
       }
     }
     check()
-    const id = setInterval(check, 15000)
+    const id = setInterval(check, 5000)
     return () => clearInterval(id)
   }, [])
+
+  const dotColor =
+    status === 'connected' ? 'var(--green)' :
+    status === 'checking'  ? 'var(--muted)' : 'var(--red)'
+
+  const label =
+    status === 'connected'      ? 'IB Connected' :
+    status === 'ib_disconnected'? 'IB Disconnected' :
+    status === 'api_down'       ? 'API Down' : 'Checking…'
 
   return (
     <header
@@ -34,15 +45,13 @@ export default function TopBar() {
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background:
-              connected === null ? 'var(--muted)' :
-              connected ? 'var(--green)' : 'var(--red)',
-            boxShadow: connected ? '0 0 6px var(--green)' : 'none',
+            background: dotColor,
+            boxShadow: status === 'connected' ? '0 0 6px var(--green)' : 'none',
             transition: 'background 0.3s',
           }}
         />
         <span className="text-xs" style={{ color: 'var(--muted)' }}>
-          {connected === null ? 'Checking…' : connected ? 'Connected' : 'Disconnected'}
+          {label}
         </span>
       </div>
     </header>

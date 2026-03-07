@@ -51,6 +51,20 @@ class MarketDataStream:
 
         return self.subscriptions
 
+    async def resubscribe_all(self) -> None:
+        """
+        Re-request market data for all tracked symbols after a reconnect.
+        Uses the qualified contract stored in each existing Ticker.
+        """
+        if not self.subscriptions:
+            return
+        for symbol, old_ticker in list(self.subscriptions.items()):
+            contract = old_ticker.contract
+            if contract is not None:
+                ticker = self.ib.reqMktData(contract, genericTickList="", snapshot=False)
+                self.subscriptions[symbol] = ticker
+                logger.info(f"Re-subscribed to {symbol}")
+
     def unsubscribe_all(self):
         """Cancel all market data subscriptions."""
         for symbol, ticker in self.subscriptions.items():
