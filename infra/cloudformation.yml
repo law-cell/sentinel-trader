@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SentinelTrader - Plan B deployment (no ALB).
+  ECS Fargate task gets a dynamic public IP. Port 8000 is open to the internet.
+  Access the app at http://<task-public-ip>:8000 after deployment.
+
+# ─── Parameters ───────────────────────────────────────────────────────────────
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: Full ECR image URI (e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/sentinel-trader:latest)
+
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Telegram bot token for trade notifications (optional)
+
+  TelegramChatId:
+    Type: String
+    Default: ''
+    Description: Telegram chat ID for trade notifications (optional)
+
+  IbPort:
+    Type: Number
+    Default: 4001
+    Description: IB Gateway port (4001=live, 4002=paper). TWS ports are 7496/7497.
+
+  IbClientId:
+    Type: Number
+    Default: 1
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+
+Resources:
+
+  # ── Networking ──────────────────────────────────────────────────────────────
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      # Pick the first AZ in the region automatically
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-public-subnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # ── Security Group ──────────────────────────────────────────────────────────
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound port 8000 for SentinelTrader
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access to FastAPI
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-sg
+
+  # ── ECR Repository ──────────────────────────────────────────────────────────
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: sentinel-trader
+      # Automatically expire old images — keep the latest 5 only
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 5 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  # ── IAM ─────────────────────────────────────────────────────────────────────
+
+  # ECS needs this role to pull images from ECR and write logs to CloudWatch
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sentinel-trader-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # ── CloudWatch Logs ─────────────────────────────────────────────────────────
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/sentinel-trader
+      RetentionInDays: 7
+
+  # ── ECS ─────────────────────────────────────────────────────────────────────
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: sentinel-trader
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sentinel-trader
+      Cpu: '256'      # 0.25 vCPU
+      Memory: '512'   # 512 MB
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: sentinel-trader
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          Environment:
+            # In ECS, app and IB Gateway run in the same task → localhost
+            - Name: IB_HOST
+              Value: '127.0.0.1'
+            - Name: IB_PORT
+              Value: !Sub '${IbPort}'
+            - Name: IB_CLIENT_ID
+              Value: !Sub '${IbClientId}'
+            - Name: TELEGRAM_BOT_TOKEN
+              Value: !Ref TelegramBotToken
+            - Name: TELEGRAM_CHAT_ID
+              Value: !Ref TelegramChatId
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  ECSService:
+    Type: AWS::ECS::Service
+    # Service needs the subnet route to the IGW to pull ECR images
+    DependsOn: PublicRoute
+    Properties:
+      ServiceName: sentinel-trader
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # ENABLED = Fargate assigns a dynamic public IP to the task ENI
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnet
+          SecurityGroups:
+            - !Ref AppSecurityGroup
+
+# ─── Outputs ──────────────────────────────────────────────────────────────────
+
+Outputs:
+  ClusterName:
+    Value: !Ref ECSCluster
+    Description: ECS Cluster name
+
+  ServiceName:
+    Value: !GetAtt ECSService.Name
+    Description: ECS Service name
+
+  ECRRepositoryUri:
+    Value: !GetAtt ECRRepository.RepositoryUri
+    Description: ECR repository URI for docker push
+
+  Note:
+    Value: >
+      The task gets a dynamic public IP on each start.
+      Run: aws ecs list-tasks --cluster sentinel-trader --service-name sentinel-trader
+      then: aws ecs describe-tasks --cluster sentinel-trader --tasks <task-arn>
+      to find the ENI, then: aws ec2 describe-network-interfaces --network-interface-ids <eni-id>
+      to get the public IP. The deploy.sh script does this automatically.

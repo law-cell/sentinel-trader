@@ -1,0 +1,362 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SentinelTrader - Production deployment.
+  Extends Plan B with: ALB + HTTPS Listener + ACM Certificate + Route 53 A record.
+  Requires a pre-issued ACM certificate and a Route 53 hosted zone.
+
+# ─── Parameters ───────────────────────────────────────────────────────────────
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: Full ECR image URI
+
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+
+  TelegramChatId:
+    Type: String
+    Default: ''
+
+  IbPort:
+    Type: Number
+    Default: 4001
+
+  IbClientId:
+    Type: Number
+    Default: 1
+
+  # ── Production-only params ──────────────────────────────────────────────────
+
+  DomainName:
+    Type: String
+    Description: >
+      Your domain (e.g. trading.example.com).
+      Must match the ACM certificate.
+
+  HostedZoneId:
+    Type: String
+    Description: Route 53 Hosted Zone ID for the domain (e.g. Z1PA6795UKMFR9)
+
+  AcmCertificateArn:
+    Type: String
+    Description: >
+      ARN of the ACM certificate for the domain.
+      Must be in the same region as this stack (or us-east-1 for CloudFront).
+      Issue via: aws acm request-certificate --domain-name trading.example.com --validation-method DNS
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+
+Resources:
+
+  # ── Networking ──────────────────────────────────────────────────────────────
+  # Two public subnets in different AZs — ALB requires at least two AZs.
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # First AZ
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-subnet-a
+
+  # Second AZ (required by ALB)
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-subnet-b
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetAAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetBAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # ── Security Groups ─────────────────────────────────────────────────────────
+
+  # ALB security group: accepts HTTPS (443) and HTTP (80) from the internet
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB inbound HTTPS and HTTP
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP redirect to HTTPS
+
+  # App security group: only accepts traffic from the ALB on port 8000
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS task — only ALB can reach port 8000
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Traffic from ALB only
+
+  # ── ECR ─────────────────────────────────────────────────────────────────────
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: sentinel-trader
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 5 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  # ── IAM ─────────────────────────────────────────────────────────────────────
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sentinel-trader-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # ── CloudWatch Logs ─────────────────────────────────────────────────────────
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/sentinel-trader
+      RetentionInDays: 30
+
+  # ── ECS ─────────────────────────────────────────────────────────────────────
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: sentinel-trader
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sentinel-trader
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: sentinel-trader
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+          Environment:
+            - Name: IB_HOST
+              Value: '127.0.0.1'
+            - Name: IB_PORT
+              Value: !Sub '${IbPort}'
+            - Name: IB_CLIENT_ID
+              Value: !Sub '${IbClientId}'
+            - Name: TELEGRAM_BOT_TOKEN
+              Value: !Ref TelegramBotToken
+            - Name: TELEGRAM_CHAT_ID
+              Value: !Ref TelegramChatId
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  ECSService:
+    Type: AWS::ECS::Service
+    # Service must wait for ALB target group to be registered
+    DependsOn:
+      - ALBListenerHTTPS
+      - ALBListenerHTTPRedirect
+    Properties:
+      ServiceName: sentinel-trader
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # Tasks don't need a public IP — ALB handles inbound traffic
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+          SecurityGroups:
+            - !Ref AppSecurityGroup
+      # Wire the service to the ALB target group
+      LoadBalancers:
+        - ContainerName: sentinel-trader
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+      # Wait for tasks to become healthy before shifting traffic
+      HealthCheckGracePeriodSeconds: 30
+
+  # ── ALB ─────────────────────────────────────────────────────────────────────
+
+  # Application Load Balancer — internet-facing, spans both AZs
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: sentinel-trader-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  # Target group — ALB forwards requests here; health check hits /api/health
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: sentinel-trader-tg
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip   # Fargate uses awsvpc mode → IP targets
+      VpcId: !Ref VPC
+      HealthCheckPath: /api/health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      # Return 200 from /api/health even when IB is disconnected (API is still up)
+      Matcher:
+        HttpCode: '200'
+
+  # HTTPS listener — terminates TLS, forwards to target group
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref AcmCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # HTTP listener — redirects all HTTP → HTTPS (301)
+  ALBListenerHTTPRedirect:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+
+  # ── Route 53 ────────────────────────────────────────────────────────────────
+
+  # DNS A record aliased to the ALB — no IP management needed
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      # ALB alias — zero TTL, health-check aware routing
+      AliasTarget:
+        DNSName: !GetAtt ALB.DNSName
+        EvaluateTargetHealth: true
+        # ALB hosted zone IDs are region-specific; CloudFormation resolves this automatically
+        HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+
+# ─── Outputs ──────────────────────────────────────────────────────────────────
+
+Outputs:
+  AppURL:
+    Value: !Sub 'https://${DomainName}'
+    Description: Production URL
+
+  ALBDNSName:
+    Value: !GetAtt ALB.DNSName
+    Description: ALB DNS name (use this for CNAME if not using Route 53)
+
+  ECRRepositoryUri:
+    Value: !GetAtt ECRRepository.RepositoryUri
