@@ -111,28 +111,6 @@ Resources:
         - Key: Name
           Value: sentinel-trader-sg
 
-  # ── ECR Repository ──────────────────────────────────────────────────────────
-
-  ECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: sentinel-trader
-      # Automatically expire old images — keep the latest 5 only
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [{
-              "rulePriority": 1,
-              "description": "Keep last 5 images",
-              "selection": {
-                "tagStatus": "any",
-                "countType": "imageCountMoreThan",
-                "countNumber": 5
-              },
-              "action": { "type": "expire" }
-            }]
-          }
-
   # ── IAM ─────────────────────────────────────────────────────────────────────
 
   # ECS needs this role to pull images from ECR and write logs to CloudWatch
@@ -233,10 +211,6 @@ Outputs:
   ServiceName:
     Value: !GetAtt ECSService.Name
     Description: ECS Service name
-
-  ECRRepositoryUri:
-    Value: !GetAtt ECRRepository.RepositoryUri
-    Description: ECR repository URI for docker push
 
   Note:
     Value: >
