@@ -1,18 +1,37 @@
 services:
+
+  # ── IB Gateway ──────────────────────────────────────────────────────────────
+  # Headless IB Gateway running in a container.
+  # sentinel-trader connects to it via the service hostname "ib-gateway".
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:latest
+    restart: unless-stopped
+    environment:
+      TWS_USERID: ${TWS_USERID}
+      TWS_PASSWORD: ${TWS_PASSWORD}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      # On 2FA timeout: restart instead of exiting
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      AUTO_RESTART_TIME: "11:59 PM"
+      TIME_ZONE: Europe/Dublin
+    ports:
+      # Expose gateway ports to host for debugging (optional)
+      - "4001:4001"   # live
+      - "4002:4002"   # paper
+
+  # ── SentinelTrader ──────────────────────────────────────────────────────────
   sentinel-trader:
     build: .
     ports:
       - "8000:8000"
     env_file: .env
     environment:
-      # Override IB_HOST so the container can reach TWS on the host machine.
-      # Docker Desktop (Windows/Mac): host.docker.internal resolves automatically.
-      # Linux: the extra_hosts entry below maps it to the host gateway.
-      - IB_HOST=${IB_HOST:-host.docker.internal}
-      - IB_PORT=${IB_PORT:-7497}
+      # In docker-compose, containers talk via service name (not localhost)
+      - IB_HOST=ib-gateway
+      - IB_PORT=4002
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-    extra_hosts:
-      # Linux host networking: makes host.docker.internal resolve to the host
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - ib-gateway
     restart: unless-stopped
