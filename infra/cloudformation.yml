@@ -22,10 +22,25 @@ Parameters:
     Default: ''
     Description: Telegram chat ID for trade notifications (optional)
 
+  TwsUserId:
+    Type: String
+    Description: Interactive Brokers username (TWS_USERID)
+
+  TwsPassword:
+    Type: String
+    NoEcho: true
+    Description: Interactive Brokers password (TWS_PASSWORD)
+
+  TradingMode:
+    Type: String
+    Default: paper
+    AllowedValues: [paper, live]
+    Description: IB Gateway trading mode — paper (port 4002) or live (port 4001)
+
   IbPort:
     Type: Number
-    Default: 4001
-    Description: IB Gateway port (4001=live, 4002=paper). TWS ports are 7496/7497.
+    Default: 4002
+    Description: IB Gateway port (4002=paper, 4001=live)
 
   IbClientId:
     Type: Number
@@ -150,21 +165,62 @@ Resources:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: sentinel-trader
-      Cpu: '256'      # 0.25 vCPU
-      Memory: '512'   # 512 MB
+      Cpu: '512'      # 0.5 vCPU — IB Gateway needs more than 0.25
+      Memory: '1024'  # 1 GB
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
+
+        # ── IB Gateway sidecar ──────────────────────────────────────────────
+        # Runs alongside sentinel-trader in the same Task.
+        # Both containers share the awsvpc network namespace → localhost.
+        - Name: ib-gateway
+          Image: ghcr.io/gnzsnz/ib-gateway:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 4001    # live gateway port
+              Protocol: tcp
+            - ContainerPort: 4002    # paper gateway port
+              Protocol: tcp
+          Environment:
+            - Name: TWS_USERID
+              Value: !Ref TwsUserId
+            - Name: TWS_PASSWORD
+              Value: !Ref TwsPassword
+            - Name: TRADING_MODE
+              Value: !Ref TradingMode
+            # On 2FA timeout: restart IB Gateway instead of exiting
+            - Name: TWOFA_TIMEOUT_ACTION
+              Value: restart
+            - Name: RELOGIN_AFTER_TWOFA_TIMEOUT
+              Value: 'yes'
+            # Daily auto-restart just before market open (avoids mid-session drops)
+            - Name: AUTO_RESTART_TIME
+              Value: '11:59 PM'
+            - Name: TIME_ZONE
+              Value: Europe/Dublin
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ib-gateway
+
+        # ── SentinelTrader app ───────────────────────────────────────────────
         - Name: sentinel-trader
           Image: !Ref ImageUri
           Essential: true
+          # Wait for IB Gateway to start before the app tries to connect
+          DependsOn:
+            - ContainerName: ib-gateway
+              Condition: START
           PortMappings:
             - ContainerPort: 8000
               Protocol: tcp
           Environment:
-            # In ECS, app and IB Gateway run in the same task → localhost
+            # Same Task = shared localhost network namespace
             - Name: IB_HOST
               Value: '127.0.0.1'
             - Name: IB_PORT
@@ -180,7 +236,7 @@ Resources:
             Options:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
+              awslogs-stream-prefix: sentinel-trader
 
   ECSService:
     Type: AWS::ECS::Service

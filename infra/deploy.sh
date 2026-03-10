@@ -23,9 +23,35 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+TWS_USERID="${TWS_USERID:-}"
+TWS_PASSWORD="${TWS_PASSWORD:-}"
+TRADING_MODE="${TRADING_MODE:-paper}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Load .env from project root (fills any vars not already set in environment)
+ENV_FILE="${PROJECT_ROOT}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  while IFS='=' read -r key value; do
+    # Skip blank lines and comments
+    [[ -z "${key}" || "${key}" =~ ^# ]] && continue
+    # Strip inline comments and surrounding quotes from value
+    value="${value%%#*}"
+    value="${value%"${value##*[![:space:]]}"}"
+    value="${value#\"}" ; value="${value%\"}"
+    value="${value#\'}" ; value="${value%\'}"
+    # Only set if not already set in the environment
+    [[ -z "${!key+x}" ]] && export "${key}=${value}"
+  done < "${ENV_FILE}"
+fi
+
+# Re-read after .env load in case they were unset
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+TWS_USERID="${TWS_USERID:-}"
+TWS_PASSWORD="${TWS_PASSWORD:-}"
+TRADING_MODE="${TRADING_MODE:-paper}"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,10 +77,15 @@ echo ""
 echo "================================================"
 echo "  SentinelTrader — ECS Fargate Deploy"
 echo "================================================"
-echo "  Account : ${AWS_ACCOUNT_ID}"
-echo "  Region  : ${AWS_REGION}"
-echo "  Image   : ${IMAGE_URI}"
+echo "  Account      : ${AWS_ACCOUNT_ID}"
+echo "  Region       : ${AWS_REGION}"
+echo "  Image        : ${IMAGE_URI}"
+echo "  Trading mode : ${TRADING_MODE}"
+echo "  TWS user     : ${TWS_USERID:-<not set>}"
 echo "================================================"
+
+[[ -z "${TWS_USERID}" ]] && die "TWS_USERID is not set. Add it to .env or export it."
+[[ -z "${TWS_PASSWORD}" ]] && die "TWS_PASSWORD is not set. Add it to .env or export it."
 
 # ─── Step 1: Ensure ECR repository exists ─────────────────────────────────────
 
@@ -112,6 +143,9 @@ aws cloudformation deploy \
     ImageUri="${IMAGE_URI}" \
     TelegramBotToken="${TELEGRAM_BOT_TOKEN}" \
     TelegramChatId="${TELEGRAM_CHAT_ID}" \
+    TwsUserId="${TWS_USERID}" \
+    TwsPassword="${TWS_PASSWORD}" \
+    TradingMode="${TRADING_MODE}" \
   --no-fail-on-empty-changeset
 
 success "Stack deployed."
