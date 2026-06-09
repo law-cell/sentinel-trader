@@ -41,21 +41,23 @@ STATIC_DIR = Path("web/dist")
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
     conn = IBConnection()
-    ib = None
     try:
-        ib = await conn.connect()
+        await conn.connect()
         # Type 1 = real-time (requires Master Client ID = IB_CLIENT_ID in TWS API settings)
         # Type 3 = delayed  (free, no subscription needed)
         # Type 4 = frozen   (last snapshot, works even with competing live session)
-        ib.reqMarketDataType(1)
+        conn.ib.reqMarketDataType(1)
         logger.info("IB connected")
     except Exception as e:
-        logger.error(f"IB connection failed: {e} — account/market-data endpoints will return 503")
+        logger.error(f"IB connection failed: {e} — will retry in background")
+        # Initial connect failed — disconnectedEvent won't fire, so start reconnect manually
+        asyncio.create_task(conn._reconnect_loop())
+    ib = conn.ib  # always non-None; use ib.isConnected() to check live status
 
     engine = RuleEngine()
     engine_task = None
 
-    if ib is not None and RULES_FILE.exists():
+    if ib.isConnected() and RULES_FILE.exists():
         engine.load_rules(RULES_FILE)
         if engine.all_rules:
             engine_task = asyncio.create_task(engine.run(ib, engine.symbols))

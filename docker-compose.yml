@@ -13,6 +13,8 @@ services:
       # On 2FA timeout: restart instead of exiting
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      # Auto-dismiss "Existing session detected" dialog
+      EXISTING_SESSION_DETECTED_ACTION: primary
       AUTO_RESTART_TIME: "11:59 PM"
       TIME_ZONE: Europe/Dublin
     ports:

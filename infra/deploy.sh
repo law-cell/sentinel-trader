@@ -16,7 +16,7 @@ set -euo pipefail
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-eu-west-1}"
 STACK_NAME="sentinel-trader"
 ECR_REPO="sentinel-trader"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
@@ -30,23 +30,30 @@ TRADING_MODE="${TRADING_MODE:-paper}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Load .env from project root (fills any vars not already set in environment)
+# Load .env from project root (only fills vars not already set in environment)
 ENV_FILE="${PROJECT_ROOT}/.env"
 if [[ -f "${ENV_FILE}" ]]; then
-  while IFS='=' read -r key value; do
+  while IFS= read -r line || [[ -n "${line}" ]]; do
     # Skip blank lines and comments
-    [[ -z "${key}" || "${key}" =~ ^# ]] && continue
-    # Strip inline comments and surrounding quotes from value
+    [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]] && continue
+    # Must contain '='
+    [[ "${line}" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    # Skip keys with spaces or special chars (invalid variable names)
+    [[ "${key}" =~ [^a-zA-Z0-9_] ]] && continue
+    # Strip inline comments and surrounding quotes
     value="${value%%#*}"
     value="${value%"${value##*[![:space:]]}"}"
     value="${value#\"}" ; value="${value%\"}"
     value="${value#\'}" ; value="${value%\'}"
-    # Only set if not already set in the environment
-    [[ -z "${!key+x}" ]] && export "${key}=${value}"
+    # Only export if the variable is currently empty
+    eval "cur=\${${key}:-}"
+    [[ -z "${cur}" ]] && export "${key}=${value}"
   done < "${ENV_FILE}"
 fi
 
-# Re-read after .env load in case they were unset
+# Re-read after .env load
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 TWS_USERID="${TWS_USERID:-}"
@@ -111,10 +118,12 @@ success "ECR repository ready."
 
 info "Step 2: Building Docker image (this may take a few minutes)..."
 
+# cygpath converts MSYS /c/... paths to Windows C:\... for Docker on Windows
+DOCKER_CONTEXT="$(cygpath -w "${PROJECT_ROOT}" 2>/dev/null || echo "${PROJECT_ROOT}")"
 docker build \
   --platform linux/amd64 \
   -t "${ECR_REPO}:${IMAGE_TAG}" \
-  "${PROJECT_ROOT}"
+  "${DOCKER_CONTEXT}"
 
 success "Docker image built."
 
@@ -134,8 +143,9 @@ success "Image pushed: ${IMAGE_URI}"
 
 info "Step 4: Deploying CloudFormation stack '${STACK_NAME}'..."
 
+CFN_TEMPLATE="$(cygpath -w "${SCRIPT_DIR}/cloudformation.yml" 2>/dev/null || echo "${SCRIPT_DIR}/cloudformation.yml")"
 aws cloudformation deploy \
-  --template-file "${SCRIPT_DIR}/cloudformation.yml" \
+  --template-file "${CFN_TEMPLATE}" \
   --stack-name "${STACK_NAME}" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "${AWS_REGION}" \
@@ -146,17 +156,26 @@ aws cloudformation deploy \
     TwsUserId="${TWS_USERID}" \
     TwsPassword="${TWS_PASSWORD}" \
     TradingMode="${TRADING_MODE}" \
+    IbPort="$([ "${TRADING_MODE}" = "live" ] && echo 4001 || echo 4002)" \
   --no-fail-on-empty-changeset
 
 success "Stack deployed."
+
+# Force ECS to pull the latest image even if CloudFormation had no infra changes
+aws ecs update-service \
+  --cluster "${STACK_NAME}" \
+  --service "${STACK_NAME}" \
+  --force-new-deployment \
+  --region "${AWS_REGION}" \
+  --output text >/dev/null
 
 # ─── Step 5: Get task public IP ───────────────────────────────────────────────
 
 info "Step 5: Retrieving public IP of running task..."
 
-# ECS may take a few seconds to start the task after stack update
+# ECS may take a few seconds to start the task after force-new-deployment
 echo "  Waiting for task to start..."
-sleep 15
+sleep 45
 
 TASK_ARN=$(aws ecs list-tasks \
   --cluster "${STACK_NAME}" \

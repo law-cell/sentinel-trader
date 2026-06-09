@@ -196,6 +196,9 @@ Resources:
               Value: restart
             - Name: RELOGIN_AFTER_TWOFA_TIMEOUT
               Value: 'yes'
+            # Auto-dismiss "Existing session detected" dialog (take over as primary)
+            - Name: EXISTING_SESSION_DETECTED_ACTION
+              Value: primary
             # Daily auto-restart just before market open (avoids mid-session drops)
             - Name: AUTO_RESTART_TIME
               Value: '11:59 PM'
