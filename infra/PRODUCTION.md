@@ -2,9 +2,10 @@
 
 Two CloudFormation templates exist in this directory. Both have been deployed
 and validated; neither stack is currently active — infrastructure was torn down
-for cost discipline. Either template can be redeployed in minutes via
-`aws cloudformation deploy`. This document explains what each does, why they
-differ, and what it costs to run each one.
+for cost discipline. Either template can be redeployed in under 20 minutes via
+`aws cloudformation deploy` (allow 3 additional minutes for IB Gateway 2FA approval
+on first login). This document explains what each does, why they differ, and what
+it costs to run each one.
 
 ---
 
@@ -23,7 +24,7 @@ differ, and what it costs to run each one.
 | **Stable URL** | No — IP changes on every restart | Yes — Route 53 A alias to ALB |
 | **Container Insights** | No | Yes |
 | **Log retention** | 7 days | 30 days |
-| **Monthly cost** | ~€18 | ~€55–65 |
+| **Monthly cost** | ~€18 | ~€35–40 |
 
 Both templates run the **same two containers** in the same ECS Task:
 
