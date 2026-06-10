@@ -41,6 +41,20 @@ STATIC_DIR = Path("web/dist")
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
     conn = IBConnection()
+    engine = RuleEngine()
+    engine_task = None
+
+    # Register reconnect callback before the initial connect attempt so it is
+    # in place whether the first connect succeeds, fails, or races to reconnect.
+    async def on_reconnect(ib_instance) -> None:
+        ib_instance.reqMarketDataType(1)
+        logger.info("Reconnect callback: set market data type to real-time")
+        if engine._stream is not None:
+            await engine._stream.resubscribe_all()
+            logger.info("Reconnect callback: resubscribed all market data streams")
+
+    conn.set_reconnect_callback(on_reconnect)
+
     try:
         await conn.connect()
         # Type 1 = real-time (requires Master Client ID = IB_CLIENT_ID in TWS API settings)
@@ -54,32 +68,20 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(conn._reconnect_loop())
     ib = conn.ib  # always non-None; use ib.isConnected() to check live status
 
-    engine = RuleEngine()
-    engine_task = None
-
-    if ib.isConnected() and RULES_FILE.exists():
+    if RULES_FILE.exists():
         engine.load_rules(RULES_FILE)
-        if engine.all_rules:
-            engine_task = asyncio.create_task(engine.run(ib, engine.symbols))
-            logger.info("Rule engine started as background task")
-        else:
-            logger.warning("No rules loaded — engine not started")
+
+    if ib.isConnected():
+        engine_task = asyncio.create_task(engine.run(ib, engine.symbols))
+        logger.info("Rule engine started as background task")
+    else:
+        logger.warning("IB not connected at startup — engine will start on reconnect")
 
     # Expose shared state to all request handlers via app.state
     app.state.ib = ib
     app.state.conn = conn
     app.state.engine = engine
     app.state.engine_task = engine_task
-
-    # Register reconnect callback — runs after each successful reconnect
-    async def on_reconnect(ib_instance) -> None:
-        ib_instance.reqMarketDataType(1)
-        logger.info("Reconnect callback: set market data type to real-time")
-        if engine._stream is not None:
-            await engine._stream.resubscribe_all()
-            logger.info("Reconnect callback: resubscribed all market data streams")
-
-    conn.set_reconnect_callback(on_reconnect)
 
     logger.info("API server ready")
     yield  # ── Serving requests ──────────────────────────────────────────────

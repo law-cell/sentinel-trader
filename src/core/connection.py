@@ -106,7 +106,7 @@ class IBConnection:
         logger.warning("Disconnected from IB.")
         if not self._shutdown:
             # Schedule reconnect loop as a new asyncio task
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             if self._reconnect_task is None or self._reconnect_task.done():
                 self._reconnect_task = loop.create_task(self._reconnect_loop())
                 logger.info(f"Reconnect loop started — will retry every {RECONNECT_INTERVAL}s")

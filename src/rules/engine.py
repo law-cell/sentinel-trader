@@ -144,18 +144,21 @@ class RuleEngine:
         """
         Subscribe to market data for the given symbols and evaluate rules
         on every incoming tick until cancelled.
+
+        Starts even with no initial symbols — _stream is initialised immediately
+        so subscribe_symbol() works for the first rule added at runtime.
         """
         active_symbols = [s for s in symbols if s in self._rules]
-        if not active_symbols:
-            logger.warning("No rules defined for any of the requested symbols — nothing to do")
-            return
-
-        logger.info(f"Starting rule engine for symbols: {active_symbols}")
-        logger.info(f"Active rules: {len(self.all_rules)}")
 
         stream = MarketDataStream(ib)
-        await stream.subscribe(active_symbols)
-        self._stream = stream
+        self._stream = stream  # set before any await so subscribe_symbol() is usable
+
+        if active_symbols:
+            logger.info(f"Starting rule engine for symbols: {active_symbols}")
+            logger.info(f"Active rules: {len(self.all_rules)}")
+            await stream.subscribe(active_symbols)
+        else:
+            logger.info("Rule engine started — no initial symbols, waiting for dynamic subscriptions")
 
         await asyncio.sleep(2)
 
