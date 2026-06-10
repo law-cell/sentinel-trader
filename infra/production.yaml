@@ -1,0 +1,592 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SentinelTrader — Production deployment.
+  ECS Fargate behind an ALB with HTTPS termination, Route 53 DNS, multi-AZ
+  subnets, and CPU-based auto-scaling (min 1 / max 3 tasks).
+  Optionally enables a WAF web ACL with AWS managed rule groups.
+  Requires a pre-issued ACM certificate and a Route 53 hosted zone.
+
+# ─── Parameters ───────────────────────────────────────────────────────────────
+
+Parameters:
+
+  # ── Image ───────────────────────────────────────────────────────────────────
+
+  ImageUri:
+    Type: String
+    Description: Full ECR image URI (e.g. 123456789.dkr.ecr.eu-west-1.amazonaws.com/sentinel-trader:latest)
+
+  # ── IB Gateway / app ────────────────────────────────────────────────────────
+
+  TwsUserId:
+    Type: String
+    Description: Interactive Brokers username
+
+  TwsPassword:
+    Type: String
+    NoEcho: true
+    Description: Interactive Brokers password
+
+  TradingMode:
+    Type: String
+    Default: paper
+    AllowedValues: [paper, live]
+    Description: IB Gateway trading mode
+
+  IbPort:
+    Type: Number
+    Default: 4002
+    Description: IB Gateway API port (4002=paper, 4001=live). deploy.sh sets this automatically.
+
+  IbClientId:
+    Type: Number
+    Default: 1
+
+  # ── Notifications ────────────────────────────────────────────────────────────
+
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Telegram bot token for trade notifications (optional)
+
+  TelegramChatId:
+    Type: String
+    Default: ''
+    Description: Telegram chat ID for trade notifications (optional)
+
+  # ── Domain / TLS ─────────────────────────────────────────────────────────────
+
+  DomainName:
+    Type: String
+    Description: >
+      Fully-qualified domain name (e.g. trading.example.com).
+      Must match the ACM certificate CN or SAN.
+
+  HostedZoneId:
+    Type: String
+    Description: >
+      Route 53 Hosted Zone ID for the domain (e.g. Z1PA6795UKMFR9).
+      Find it with: aws route53 list-hosted-zones
+
+  AcmCertificateArn:
+    Type: String
+    Description: >
+      ARN of an ISSUED ACM certificate in the same region as this stack.
+      Request one with:
+        aws acm request-certificate --domain-name trading.example.com
+          --validation-method DNS --region eu-west-1
+      Then add the CNAME validation record in Route 53 and wait for ISSUED status.
+
+  # ── Auto-scaling ─────────────────────────────────────────────────────────────
+
+  MinCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Minimum number of running ECS tasks
+
+  MaxCapacity:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    Description: Maximum number of ECS tasks during scale-out
+
+  CpuScalingTarget:
+    Type: Number
+    Default: 60
+    Description: Target average CPU utilisation (%) that triggers scaling
+
+  # ── WAF ──────────────────────────────────────────────────────────────────────
+
+  EnableWAF:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >
+      Attach a WAF web ACL with AWS managed rule groups (CommonRuleSet +
+      KnownBadInputs) to the ALB. Adds ~$5–10/month. Set to 'true' before
+      exposing the service to the public internet.
+
+# ─── Conditions ───────────────────────────────────────────────────────────────
+
+Conditions:
+  WAFEnabled: !Equals [!Ref EnableWAF, 'true']
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+
+Resources:
+
+  # ── Networking ──────────────────────────────────────────────────────────────
+  # Two public subnets across two AZs. ALB requires at least two AZs.
+  # ECS tasks run in both subnets; ALB spreads traffic across them.
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-subnet-a
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-subnet-b
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # ── Security Groups ─────────────────────────────────────────────────────────
+  #
+  # ALBSecurityGroup  — internet-facing; accepts 80 (redirect) and 443 (HTTPS)
+  # AppSecurityGroup  — ECS tasks; accepts 8000 from ALB only
+  #
+  # Port 8000 is NOT open to 0.0.0.0/0. The only path in is via the ALB.
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB — inbound HTTPS and HTTP redirect
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP (redirect to HTTPS)
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-alb-sg
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS tasks — port 8000 from ALB only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Traffic from ALB only — not directly internet-accessible
+      Tags:
+        - Key: Name
+          Value: sentinel-trader-app-sg
+
+  # ── IAM ─────────────────────────────────────────────────────────────────────
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sentinel-trader-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # Application Auto Scaling needs this to update the ECS service desired count
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sentinel-trader-autoscaling-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSAutoScaling
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DeleteAlarms
+                Resource: '*'
+
+  # ── CloudWatch Logs ─────────────────────────────────────────────────────────
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/sentinel-trader
+      RetentionInDays: 30
+
+  # ── ECS ─────────────────────────────────────────────────────────────────────
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: sentinel-trader
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled    # CloudWatch Container Insights for metrics/tracing
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sentinel-trader
+      Cpu: '512'      # 0.5 vCPU — IB Gateway is memory/cpu hungry at startup
+      Memory: '1024'  # 1 GB
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+
+        # ── IB Gateway sidecar ────────────────────────────────────────────────
+        # Runs in the same Task as sentinel-trader.
+        # awsvpc mode means both containers share one network namespace
+        # → they communicate on localhost without exposing IB ports externally.
+        - Name: ib-gateway
+          Image: ghcr.io/gnzsnz/ib-gateway:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 4001    # live gateway
+              Protocol: tcp
+            - ContainerPort: 4002    # paper gateway
+              Protocol: tcp
+          Environment:
+            - Name: TWS_USERID
+              Value: !Ref TwsUserId
+            - Name: TWS_PASSWORD
+              Value: !Ref TwsPassword
+            - Name: TRADING_MODE
+              Value: !Ref TradingMode
+            - Name: TWOFA_TIMEOUT_ACTION
+              Value: restart
+            - Name: RELOGIN_AFTER_TWOFA_TIMEOUT
+              Value: 'yes'
+            - Name: EXISTING_SESSION_DETECTED_ACTION
+              Value: primary
+            - Name: AUTO_RESTART_TIME
+              Value: '11:59 PM'
+            - Name: TIME_ZONE
+              Value: Europe/Dublin
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ib-gateway
+
+        # ── SentinelTrader app ────────────────────────────────────────────────
+        - Name: sentinel-trader
+          Image: !Ref ImageUri
+          Essential: true
+          DependsOn:
+            - ContainerName: ib-gateway
+              Condition: START
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          Environment:
+            - Name: IB_HOST
+              Value: '127.0.0.1'
+            - Name: IB_PORT
+              Value: !Sub '${IbPort}'
+            - Name: IB_CLIENT_ID
+              Value: !Sub '${IbClientId}'
+            - Name: TELEGRAM_BOT_TOKEN
+              Value: !Ref TelegramBotToken
+            - Name: TELEGRAM_CHAT_ID
+              Value: !Ref TelegramChatId
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: sentinel-trader
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListenerHTTPS
+      - ALBListenerHTTPRedirect
+      - PublicRoute
+    Properties:
+      ServiceName: sentinel-trader
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref MinCapacity
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # Tasks need a public IP to reach ECR and CloudWatch endpoints.
+          # The AppSecurityGroup ensures port 8000 is only reachable from the ALB.
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+          SecurityGroups:
+            - !Ref AppSecurityGroup
+      LoadBalancers:
+        - ContainerName: sentinel-trader
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+      # Give IB Gateway time to start before the ALB starts health-checking
+      HealthCheckGracePeriodSeconds: 90
+
+  # ── ALB ─────────────────────────────────────────────────────────────────────
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: sentinel-trader-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+        - Key: routing.http2.enabled
+          Value: 'true'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: sentinel-trader-tg
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip    # Fargate awsvpc mode → register by IP
+      VpcId: !Ref VPC
+      HealthCheckPath: /api/health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      # /api/health returns 200 even when IB is disconnected (API itself is up)
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'     # Fast task drain on deploys
+
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06   # TLS 1.2+ with TLS 1.3 preferred
+      Certificates:
+        - CertificateArn: !Ref AcmCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  ALBListenerHTTPRedirect:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+
+  # ── Route 53 ────────────────────────────────────────────────────────────────
+
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ALB.DNSName
+        EvaluateTargetHealth: true
+        HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+
+  # ── Auto Scaling ─────────────────────────────────────────────────────────────
+  #
+  # Scales ECS task count between MinCapacity and MaxCapacity.
+  # Scale-out when average CPU > CpuScalingTarget% for 3 minutes.
+  # Scale-in when average CPU < CpuScalingTarget% for 15 minutes (cool-down).
+  #
+  # Note: each ECS Task contains two containers (ib-gateway + sentinel-trader).
+  # Scaling to 2 tasks means 2 separate IB Gateway instances — only appropriate
+  # if you have multiple IB client IDs. For a single-account deployment, set
+  # MaxCapacity=1 and rely on ECS service recovery for HA instead.
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ECSService
+    Properties:
+      MinCapacity: !Ref MinCapacity
+      MaxCapacity: !Ref MaxCapacity
+      ResourceId: !Sub 'service/${ECSCluster}/${ECSService.Name}'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !GetAtt AutoScalingRole.Arn
+
+  ScalingPolicyCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: sentinel-trader-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: !Ref CpuScalingTarget
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 900    # 15 min — avoid flapping
+        ScaleOutCooldown: 180   # 3 min — respond quickly to load
+
+  # ── WAF (optional) ──────────────────────────────────────────────────────────
+  # Enabled by setting EnableWAF=true at deploy time.
+  # Includes two AWS managed rule groups:
+  #   - CommonRuleSet: OWASP Top 10 (SQLi, XSS, LFI, etc.)
+  #   - KnownBadInputs: known-malicious request patterns
+  # Cost: ~$5/month base + $1 per million requests inspected.
+
+  WAFWebACL:
+    Type: AWS::WAFv2::WebACL
+    Condition: WAFEnabled
+    Properties:
+      Name: sentinel-trader-waf
+      Scope: REGIONAL    # REGIONAL for ALB; CLOUDFRONT for CloudFront distributions
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: sentinel-trader-waf
+      Rules:
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: CommonRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: KnownBadInputs
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+
+  WAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: WAFEnabled
+    Properties:
+      ResourceArn: !Ref ALB
+      WebACLArn: !GetAtt WAFWebACL.Arn
+
+# ─── Outputs ──────────────────────────────────────────────────────────────────
+
+Outputs:
+
+  AppURL:
+    Value: !Sub 'https://${DomainName}'
+    Description: Production HTTPS URL
+
+  ALBDNSName:
+    Value: !GetAtt ALB.DNSName
+    Description: ALB DNS name — use as CNAME target if not using Route 53
+
+  ClusterName:
+    Value: !Ref ECSCluster
+
+  ServiceName:
+    Value: !GetAtt ECSService.Name
+
+  LogGroup:
+    Value: !Ref LogGroup
+    Description: CloudWatch log group for both containers
