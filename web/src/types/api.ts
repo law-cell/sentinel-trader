@@ -80,3 +80,10 @@ export interface RuleResponse {
   enabled: boolean
   last_triggered: string | null
 }
+
+export interface FromNLResponse {
+  status: 'ok' | 'invalid'
+  rule: RuleResponse
+  saved: boolean
+  errors: string[]
+}

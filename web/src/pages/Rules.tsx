@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, X, Check, AlertTriangle } from 'lucide-react'
 import { fetchRules, createRule, updateRule, deleteRule } from '../api/client'
 import type { RuleResponse } from '../types/api'
 import { actionShortLabel } from '../components/ActionSummary'
+import CreateRuleWithAI from '../components/CreateRuleWithAI'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -434,6 +435,9 @@ export default function Rules() {
           {error}
         </div>
       )}
+
+      {/* Create with AI */}
+      <CreateRuleWithAI onSaved={load} />
 
       {/* Table */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>

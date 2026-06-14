@@ -82,6 +82,18 @@ class RuleResponse(BaseModel):
     last_triggered: datetime | None
 
 
+class FromNLRequest(BaseModel):
+    prompt: str
+    dry_run: bool = False
+
+
+class FromNLResponse(BaseModel):
+    status: str          # "ok" | "invalid"
+    rule: RuleResponse
+    saved: bool = False
+    errors: list[str] = []
+
+
 class TriggerEvent(BaseModel):
     timestamp: str
     rule_name: str

@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { AccountSummaryResponse, PositionResponse, TriggerEvent, RuleResponse, MarketDataResponse, SymbolSearchResult } from '../types/api'
+import type { AccountSummaryResponse, PositionResponse, TriggerEvent, RuleResponse, MarketDataResponse, SymbolSearchResult, FromNLResponse } from '../types/api'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -35,6 +35,11 @@ export async function updateRule(name: string, payload: object): Promise<RuleRes
 
 export async function deleteRule(name: string): Promise<void> {
   await api.delete(`/rules/${encodeURIComponent(name)}`)
+}
+
+export async function extractRuleFromNL(prompt: string, dryRun: boolean): Promise<FromNLResponse> {
+  const { data } = await api.post<FromNLResponse>('/rules/from-nl', { prompt, dry_run: dryRun })
+  return data
 }
 
 export async function fetchMarketData(symbol: string): Promise<MarketDataResponse> {

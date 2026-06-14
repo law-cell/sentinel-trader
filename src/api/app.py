@@ -31,6 +31,7 @@ from loguru import logger
 from src.core.connection import IBConnection
 from src.rules.engine import RuleEngine
 from src.api.routes import rules as rules_router
+from src.api.routes import llm_rules as llm_rules_router
 from src.api.routes import account as account_router
 
 RULES_FILE = Path("rules.json")
@@ -119,6 +120,7 @@ app.add_middleware(
 )
 
 app.include_router(rules_router.router)
+app.include_router(llm_rules_router.router)
 app.include_router(account_router.router)
 
 

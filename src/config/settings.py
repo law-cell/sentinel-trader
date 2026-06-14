@@ -22,3 +22,41 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 # Telegram Notifications (optional)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Anthropic API (natural-language rule creation)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+
+# ──────────────────────────────────────────────────────────
+# TRADING SAFETY CONFIG — CHANGES REQUIRE REBUILD + REDEPLOY
+# ──────────────────────────────────────────────────────────
+# To enable live trading:
+#   1. Change TRADING_MODE to "live" below
+#   2. Review ALLOWED_SYMBOLS — current list is biased toward
+#      paper-friendly liquid names
+#   3. Rebuild docker image: docker compose build --no-cache
+#   4. Redeploy
+# Every step is intentional friction. Live mode is NOT toggleable
+# via .env or UI by design.
+#
+# Note: this is distinct from the TRADING_MODE in .env, which only
+# controls which IB account the Gateway container logs into
+# (paper/live). This setting gates whether SentinelTrader itself is
+# allowed to execute proposed orders.
+
+TRADING_MODE = "paper"  # ← HARDCODED
+
+ALLOWED_SYMBOLS = {
+    "AAPL", "NVDA", "TSLA", "META", "MSFT", "GOOGL",
+    "APP", "RKLB", "LITE", "CRDO",
+}
+
+MAX_NOTIONAL_PER_ORDER_USD = 2000.0
+MAX_EXECUTED_ORDERS_PER_DAY = 5    # Counts EXECUTED, not proposed
+PROPOSAL_EXPIRY_SECONDS = 180      # 3 minutes
+
+# Options-specific safety
+MAX_OPTION_PREMIUM_USD = 5.0       # per contract
+MAX_OPTION_EXPIRY_DAYS = 60
+OPTION_SIDE_ALLOWED = {"SELL"}     # sell-to-open only (no long options)
+OPTION_ORDER_TYPE_FORCED = "LIMIT"  # market orders on options are unsafe
