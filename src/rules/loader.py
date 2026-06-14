@@ -24,6 +24,7 @@ All fields except "enabled" are required.
 import json
 from pathlib import Path
 from loguru import logger
+from pydantic import ValidationError
 from src.rules.models import Rule
 
 
@@ -36,6 +37,8 @@ def load_rules_from_file(path: str | Path) -> list[Rule]:
 
     Returns:
         List of Rule instances. Malformed entries are skipped with a warning.
+        Legacy entries (where "action" is a delivery-channel string) are
+        migrated automatically — see Rule._migrate_legacy_action.
     """
     path = Path(path)
     if not path.exists():
@@ -50,17 +53,9 @@ def load_rules_from_file(path: str | Path) -> list[Rule]:
     rules: list[Rule] = []
     for i, entry in enumerate(raw):
         try:
-            rule = Rule(
-                name=entry["name"],
-                symbol=entry["symbol"],
-                condition=entry["condition"],
-                action=entry["action"],
-                cooldown=int(entry["cooldown"]),
-                enabled=entry.get("enabled", True),
-            )
-            rules.append(rule)
-        except (KeyError, TypeError) as e:
-            logger.warning(f"Skipping rule at index {i} — missing or invalid field: {e}")
+            rules.append(Rule.model_validate(entry))
+        except ValidationError as e:
+            logger.warning(f"Skipping rule at index {i} — invalid: {e}")
 
     logger.info(f"Loaded {len(rules)} rule(s) from {path}")
     return rules
@@ -72,17 +67,7 @@ def save_rules_to_file(rules: list[Rule], path: str | Path) -> None:
     Runtime-only state (last_triggered) is not saved.
     """
     path = Path(path)
-    data = [
-        {
-            "name": rule.name,
-            "symbol": rule.symbol,
-            "condition": rule.condition,
-            "action": rule.action,
-            "cooldown": rule.cooldown,
-            "enabled": rule.enabled,
-        }
-        for rule in rules
-    ]
+    data = [rule.model_dump(exclude={"last_triggered"}) for rule in rules]
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     logger.info(f"Saved {len(rules)} rule(s) to {path}")

@@ -4,9 +4,12 @@
     "symbol": "NVDA",
     "condition": {
       "type": "price_above",
-      "threshold": 190
+      "threshold": 195
     },
-    "action": "telegram",
+    "channel": "telegram",
+    "action": {
+      "type": "alert"
+    },
     "cooldown": 300,
     "enabled": true
   },
@@ -17,7 +20,10 @@
       "type": "price_change_pct",
       "threshold": 3.0
     },
-    "action": "telegram",
+    "channel": "telegram",
+    "action": {
+      "type": "alert"
+    },
     "cooldown": 600,
     "enabled": true
   },
@@ -28,7 +34,10 @@
       "type": "volume_above",
       "threshold": 50000000
     },
-    "action": "telegram",
+    "channel": "telegram",
+    "action": {
+      "type": "alert"
+    },
     "cooldown": 900,
     "enabled": true
   },
@@ -39,7 +48,10 @@
       "type": "price_below",
       "threshold": 200.0
     },
-    "action": "telegram",
+    "channel": "telegram",
+    "action": {
+      "type": "alert"
+    },
     "cooldown": 300,
     "enabled": true
   }

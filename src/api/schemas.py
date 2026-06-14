@@ -5,7 +5,11 @@ Pydantic models for request validation and response serialization.
 """
 
 from datetime import datetime
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+
+from src.rules.models import Action
+
+_ALLOWED_CHANNELS = {"log", "console", "telegram", "notify"}
 
 
 # ─── Rules ────────────────────────────────────────────────────────────────────
@@ -14,7 +18,12 @@ class RuleCreate(BaseModel):
     name: str
     symbol: str
     condition: dict
-    action: str
+    # `channel` is the new field for delivery channel ("telegram", "console", ...).
+    # `action` is the new Action union ({"type": "alert" | "propose_stock_order" | ...}).
+    # Legacy clients may still send `action` as a plain channel-name string
+    # (e.g. "telegram") — this is migrated to `channel` + AlertAction below.
+    channel: str | None = None
+    action: str | dict | None = None
     cooldown: int
     enabled: bool = True
 
@@ -22,14 +31,6 @@ class RuleCreate(BaseModel):
     @classmethod
     def uppercase_symbol(cls, v: str) -> str:
         return v.upper()
-
-    @field_validator("action")
-    @classmethod
-    def validate_action(cls, v: str) -> str:
-        allowed = {"log", "console", "telegram", "notify"}
-        if v not in allowed:
-            raise ValueError(f"action must be one of {allowed}")
-        return v
 
     @field_validator("condition")
     @classmethod
@@ -43,11 +44,29 @@ class RuleCreate(BaseModel):
             raise ValueError("condition must have a 'threshold' field")
         return v
 
+    @model_validator(mode="after")
+    def _resolve_channel_and_action(self):
+        # Legacy format: `action` was the delivery-channel name.
+        if isinstance(self.action, str):
+            if self.channel is None:
+                self.channel = self.action
+            self.action = {"type": "alert"}
+
+        if self.channel is None:
+            self.channel = "telegram"
+        if self.channel not in _ALLOWED_CHANNELS:
+            raise ValueError(f"channel must be one of {_ALLOWED_CHANNELS}")
+
+        if self.action is None:
+            self.action = {"type": "alert"}
+
+        return self
+
 
 class RuleUpdate(BaseModel):
     """All fields optional — only provided fields are updated."""
     condition: dict | None = None
-    action: str | None = None
+    channel: str | None = None
     cooldown: int | None = None
     enabled: bool | None = None
 
@@ -56,7 +75,8 @@ class RuleResponse(BaseModel):
     name: str
     symbol: str
     condition: dict
-    action: str
+    channel: str
+    action: Action
     cooldown: int
     enabled: bool
     last_triggered: datetime | None

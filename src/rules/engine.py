@@ -21,7 +21,7 @@ from src.core.connection import IBConnection
 from src.data.market_data import MarketDataStream
 from src.rules.models import Rule
 from src.rules.conditions import evaluate_condition
-from src.rules.actions import execute_action
+from src.rules.actions import execute_rule_action
 from src.rules.loader import load_rules_from_file
 
 
@@ -127,7 +127,7 @@ class RuleEngine:
             if evaluate_condition(ticker, rule.condition):
                 logger.success(f"Rule '{rule.name}' triggered for {symbol}")
                 rule.mark_triggered()
-                execute_action(rule.action, rule.name, symbol, ticker)
+                execute_rule_action(rule, symbol, ticker)
 
                 raw = ticker.last or ticker.close
                 price = float(raw) if raw and not math.isnan(float(raw)) else 0.0

@@ -48,11 +48,34 @@ export interface RuleCondition {
   threshold: number
 }
 
+export interface AlertAction {
+  type: 'alert'
+}
+
+export interface StockOrderAction {
+  type: 'propose_stock_order'
+  side: 'BUY' | 'SELL'
+  quantity: number
+  order_type: 'MARKET' | 'LIMIT'
+  limit_price: number | null
+}
+
+export interface OptionOrderAction {
+  type: 'propose_option_order'
+  right: 'C' | 'P'
+  strike: number
+  expiry_days: number
+  quantity: number
+}
+
+export type Action = AlertAction | StockOrderAction | OptionOrderAction
+
 export interface RuleResponse {
   name: string
   symbol: string
   condition: RuleCondition
-  action: string
+  channel: string
+  action: Action
   cooldown: number
   enabled: boolean
   last_triggered: string | null

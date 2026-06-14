@@ -1,16 +1,21 @@
 """
 Action Executors
 ================
-Actions are called when a rule condition is satisfied.
+Two dispatch layers, called when a rule's condition is satisfied:
 
-Available actions:
+1. Channel dispatch (dispatch_channel) — HOW an alert is delivered:
     log       Write a structured log entry via loguru (INFO level)
     console   Print a highlighted alert to the terminal (with ANSI color)
     telegram  Send a Telegram message (requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env)
     notify    Alias for telegram (backward-compatible)
 
-Each action has the signature:
-    (rule_name: str, symbol: str, ticker: Ticker) -> None
+   Each channel handler has the signature:
+       (rule_name: str, symbol: str, ticker: Ticker) -> None
+
+2. Action dispatch (execute_rule_action) — WHAT happens on trigger, based on
+   rule.action.type ("alert", "propose_stock_order", "propose_option_order").
+   "alert" delegates to the rule's channel. Order-proposal types are stubs
+   until order execution lands.
 """
 
 import asyncio
@@ -121,9 +126,10 @@ def notify_action(rule_name: str, symbol: str, ticker: Ticker) -> None:
     telegram_action(rule_name, symbol, ticker)
 
 
-# ─── Dispatch table ───────────────────────────────────────────────────────────
+# ─── Channel dispatch ─────────────────────────────────────────────────────────
+# Delivery channels for alerts — how a notification reaches the user.
 
-_ACTIONS = {
+_CHANNELS = {
     "log":      log_action,
     "console":  console_action,
     "telegram": telegram_action,
@@ -131,17 +137,58 @@ _ACTIONS = {
 }
 
 
-def execute_action(action_name: str, rule_name: str, symbol: str, ticker: Ticker) -> None:
+def dispatch_channel(channel_name: str, rule_name: str, symbol: str, ticker: Ticker) -> None:
     """
-    Dispatch to the named action handler.
+    Dispatch to the named delivery channel handler.
 
-    Falls back to log_action if the action name is unrecognised.
+    Falls back to log_action if the channel name is unrecognised.
     """
-    handler = _ACTIONS.get(action_name)
+    handler = _CHANNELS.get(channel_name)
     if handler is None:
-        logger.warning(f"Unknown action '{action_name}' for rule '{rule_name}' — falling back to log")
+        logger.warning(f"Unknown channel '{channel_name}' for rule '{rule_name}' — falling back to log")
         handler = log_action
     try:
         handler(rule_name, symbol, ticker)
     except Exception as e:
-        logger.error(f"Action '{action_name}' failed for rule '{rule_name}': {e}")
+        logger.error(f"Channel '{channel_name}' failed for rule '{rule_name}': {e}")
+
+
+# ─── Action dispatch ──────────────────────────────────────────────────────────
+# What happens when a rule's condition fires. "alert" sends a notification via
+# the rule's channel. Order-proposal actions are stubs until execution lands
+# (see Sunday scope) — they currently just alert via the channel.
+
+def _handle_alert(rule, symbol: str, ticker: Ticker) -> None:
+    dispatch_channel(rule.channel, rule.name, symbol, ticker)
+
+
+def _handle_stock_order_stub(rule, symbol: str, ticker: Ticker) -> None:
+    logger.warning(
+        f"Rule '{rule.name}' triggered a propose_stock_order action — "
+        "order proposals are not yet implemented; sending alert instead"
+    )
+    dispatch_channel(rule.channel, rule.name, symbol, ticker)
+
+
+def _handle_option_order_stub(rule, symbol: str, ticker: Ticker) -> None:
+    logger.warning(
+        f"Rule '{rule.name}' triggered a propose_option_order action — "
+        "order proposals are not yet implemented; sending alert instead"
+    )
+    dispatch_channel(rule.channel, rule.name, symbol, ticker)
+
+
+_ACTION_HANDLERS = {
+    "alert":                 _handle_alert,
+    "propose_stock_order":   _handle_stock_order_stub,
+    "propose_option_order":  _handle_option_order_stub,
+}
+
+
+def execute_rule_action(rule, symbol: str, ticker: Ticker) -> None:
+    """
+    Dispatch on rule.action.type. Falls back to alert behaviour if the
+    action type is unrecognised.
+    """
+    handler = _ACTION_HANDLERS.get(rule.action.type, _handle_alert)
+    handler(rule, symbol, ticker)

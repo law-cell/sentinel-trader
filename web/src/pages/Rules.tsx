@@ -2,21 +2,22 @@ import { useEffect, useState, useCallback } from 'react'
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle } from 'lucide-react'
 import { fetchRules, createRule, updateRule, deleteRule } from '../api/client'
 import type { RuleResponse } from '../types/api'
+import { actionShortLabel } from '../components/ActionSummary'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
 const CONDITION_TYPES = ['price_above', 'price_below', 'price_change_pct', 'volume_above'] as const
-const ACTIONS = ['telegram', 'log', 'console'] as const
+const CHANNELS = ['telegram', 'log', 'console'] as const
 
 type ConditionType = typeof CONDITION_TYPES[number]
-type ActionType = typeof ACTIONS[number]
+type ChannelType = typeof CHANNELS[number]
 
 interface FormState {
   name: string
   symbol: string
   condition_type: ConditionType
   threshold: string
-  action: ActionType
+  channel: ChannelType
   cooldown: string
 }
 
@@ -25,7 +26,7 @@ const EMPTY_FORM: FormState = {
   symbol: '',
   condition_type: 'price_above',
   threshold: '',
-  action: 'telegram',
+  channel: 'telegram',
   cooldown: '300',
 }
 
@@ -97,7 +98,7 @@ function RuleFormModal({ initial, onClose, onSaved }: RuleFormProps) {
           symbol: initial.symbol,
           condition_type: initial.condition.type as ConditionType,
           threshold: String(initial.condition.threshold),
-          action: initial.action as ActionType,
+          channel: initial.channel as ChannelType,
           cooldown: String(initial.cooldown),
         }
       : EMPTY_FORM
@@ -124,14 +125,14 @@ function RuleFormModal({ initial, onClose, onSaved }: RuleFormProps) {
         name: form.name.trim(),
         symbol: form.symbol.trim().toUpperCase(),
         condition: { type: form.condition_type, threshold },
-        action: form.action,
+        channel: form.channel,
         cooldown,
         enabled: true,
       }
       if (isEdit) {
         await updateRule(initial!.name, {
           condition: payload.condition,
-          action: payload.action,
+          channel: payload.channel,
           cooldown: payload.cooldown,
         })
       } else {
@@ -194,13 +195,13 @@ function RuleFormModal({ initial, onClose, onSaved }: RuleFormProps) {
                 disabled={isEdit}
               />
             </Field>
-            <Field label="Action">
+            <Field label="Channel">
               <select
                 style={{ ...inputStyle, cursor: 'pointer' }}
-                value={form.action}
-                onChange={e => set('action', e.target.value as ActionType)}
+                value={form.channel}
+                onChange={e => set('channel', e.target.value as ChannelType)}
               >
-                {ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+                {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </Field>
           </div>
@@ -484,7 +485,9 @@ export default function Rules() {
                   </td>
 
                   {/* Action */}
-                  <td className="px-5 py-3" style={{ color: 'var(--muted)' }}>{rule.action}</td>
+                  <td className="px-5 py-3 mono" style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                    {actionShortLabel(rule.action, rule.channel)}
+                  </td>
 
                   {/* Cooldown */}
                   <td className="px-5 py-3 mono" style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}>
