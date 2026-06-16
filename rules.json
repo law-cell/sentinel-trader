@@ -60,6 +60,24 @@
     "enabled": true
   },
   {
+    "name": "Buy 20 NVDA below $200",
+    "symbol": "NVDA",
+    "condition": {
+      "type": "price_below",
+      "threshold": 200
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 20,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
     "name": "SPY High Volume Alert",
     "symbol": "SPY",
     "condition": {
@@ -71,6 +89,24 @@
       "type": "alert"
     },
     "cooldown": 900,
+    "enabled": true
+  },
+  {
+    "name": "Buy 1 SPY below $1000",
+    "symbol": "SPY",
+    "condition": {
+      "type": "price_below",
+      "threshold": 1000
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
     "enabled": true
   },
   {
@@ -88,6 +124,24 @@
     "enabled": true
   },
   {
+    "name": "Buy 10 TSLA below $250",
+    "symbol": "TSLA",
+    "condition": {
+      "type": "price_below",
+      "threshold": 250
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 10,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
     "name": "AAPL crosses above $250",
     "symbol": "AAPL",
     "condition": {
@@ -97,6 +151,168 @@
     "channel": "telegram",
     "action": {
       "type": "alert"
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy 5 AAPL below $180",
+    "symbol": "AAPL",
+    "condition": {
+      "type": "price_below",
+      "threshold": 180
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 5,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy AAPL below $100",
+    "symbol": "AAPL",
+    "condition": {
+      "type": "price_below",
+      "threshold": 100
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy 3 MSFT below $400",
+    "symbol": "MSFT",
+    "condition": {
+      "type": "price_below",
+      "threshold": 400
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 3,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy 1 MSFT below $400",
+    "symbol": "MSFT",
+    "condition": {
+      "type": "price_below",
+      "threshold": 400
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy 1 APP below $50",
+    "symbol": "APP",
+    "condition": {
+      "type": "price_below",
+      "threshold": 50.0
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy 2 RKLB below $15",
+    "symbol": "RKLB",
+    "condition": {
+      "type": "price_below",
+      "threshold": 15
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 2,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 0,
+    "enabled": true
+  },
+  {
+    "name": "Buy META below $300",
+    "symbol": "META",
+    "condition": {
+      "type": "price_below",
+      "threshold": 300
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy GOOGL below $140",
+    "symbol": "GOOGL",
+    "condition": {
+      "type": "price_below",
+      "threshold": 140
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
+    },
+    "cooldown": 3600,
+    "enabled": true
+  },
+  {
+    "name": "Buy 1 LITE below $20",
+    "symbol": "LITE",
+    "condition": {
+      "type": "price_below",
+      "threshold": 20
+    },
+    "channel": "telegram",
+    "action": {
+      "type": "propose_stock_order",
+      "side": "BUY",
+      "quantity": 1,
+      "order_type": "MARKET",
+      "limit_price": null
     },
     "cooldown": 3600,
     "enabled": true

@@ -17,6 +17,8 @@ services:
       EXISTING_SESSION_DETECTED_ACTION: primary
       AUTO_RESTART_TIME: "11:59 PM"
       TIME_ZONE: Europe/Dublin
+      READ_ONLY_API: "no"
+      BYPASS_WARNING: "yes"
     ports:
       # Expose gateway ports to host for debugging (optional)
       - "4001:4001"   # live
@@ -30,8 +32,8 @@ services:
     env_file: .env
     environment:
       # In docker-compose, containers talk via service name (not localhost)
-      - IB_HOST=ib-gateway
-      - IB_PORT=4002
+      - IB_HOST=${IB_HOST}
+      - IB_PORT=${IB_PORT}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     depends_on:
