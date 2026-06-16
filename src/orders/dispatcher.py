@@ -4,9 +4,8 @@ Proposal Dispatcher
 Delivers order proposals to the user for approval, and "executes"
 approved proposals.
 
-StubProposalDispatcher just logs — Sunday afternoon swaps this for
-TelegramProposalDispatcher with real inline approve/reject buttons and
-real ib.placeOrder.
+get_dispatcher() returns TelegramProposalDispatcher when Telegram is
+configured, StubProposalDispatcher otherwise (logs only).
 """
 
 import itertools
@@ -54,12 +53,23 @@ class StubProposalDispatcher:
         )
         return mock_order_id
 
+    async def edit_message(self, proposal: Proposal) -> None:
+        """No-op: stub dispatcher has no Telegram message to edit."""
 
-_dispatcher: StubProposalDispatcher | None = None
+
+_dispatcher = None
 
 
-def get_dispatcher() -> StubProposalDispatcher:
+def get_dispatcher():
     global _dispatcher
     if _dispatcher is None:
-        _dispatcher = StubProposalDispatcher()
+        from src.notifications.telegram import get_telegram_app
+        tg = get_telegram_app()
+        if tg is not None:
+            from src.orders.telegram_dispatcher import TelegramProposalDispatcher
+            _dispatcher = TelegramProposalDispatcher(tg.app.bot, tg.chat_id)
+            logger.info("Using TelegramProposalDispatcher")
+        else:
+            _dispatcher = StubProposalDispatcher()
+            logger.info("Using StubProposalDispatcher (Telegram not configured)")
     return _dispatcher

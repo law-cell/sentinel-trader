@@ -30,6 +30,7 @@ from loguru import logger
 
 from src.core.connection import IBConnection
 from src.notifications.telegram import get_telegram_app
+from src.orders.dispatcher import get_dispatcher
 from src.orders.tracker import get_tracker
 from src.rules.engine import RuleEngine
 from src.api.routes import rules as rules_router
@@ -43,11 +44,18 @@ PROPOSAL_EXPIRY_CHECK_INTERVAL_SECONDS = 30
 
 
 async def _periodic_expiry() -> None:
-    """Expire stale PENDING proposals every 30s, for users who never click approve/reject."""
+    """Expire stale PENDING proposals every 30s; edit their Telegram messages to show expiry."""
     tracker = get_tracker()
     while True:
         await asyncio.sleep(PROPOSAL_EXPIRY_CHECK_INTERVAL_SECONDS)
-        tracker.expire_stale()
+        expired = tracker.expire_stale()
+        if expired:
+            dispatcher = get_dispatcher()
+            for proposal in expired:
+                try:
+                    await dispatcher.edit_message(proposal)
+                except Exception as e:
+                    logger.warning(f"Failed to edit Telegram message for expired proposal {proposal.id}: {e}")
 
 
 @asynccontextmanager
@@ -83,7 +91,7 @@ async def lifespan(app: FastAPI):
 
     tg = get_telegram_app()
     if tg is not None:
-        await tg.start()
+        await tg.start(ib=ib)
 
     if RULES_FILE.exists():
         engine.load_rules(RULES_FILE)

@@ -29,8 +29,9 @@ class ProposalBase(BaseModel):
     expires_at: datetime      # created_at + PROPOSAL_EXPIRY_SECONDS
     status: Literal["PENDING", "APPROVED", "REJECTED", "EXPIRED", "EXECUTED", "FAILED"]
     estimated_notional_usd: float
-    ib_order_id: Optional[int] = None      # populated after EXECUTED
-    failure_reason: Optional[str] = None   # populated if FAILED
+    ib_order_id: Optional[int] = None          # populated after EXECUTED
+    failure_reason: Optional[str] = None       # populated if FAILED
+    telegram_message_id: Optional[int] = None  # message_id of the sent proposal message
     # Market snapshot at proposal time, for audit
     trigger_price: float
 

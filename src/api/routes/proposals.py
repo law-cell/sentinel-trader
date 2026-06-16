@@ -11,16 +11,15 @@ Endpoints:
     POST /api/proposals/{id}/approve     — approve + (stub) execute
     POST /api/proposals/{id}/reject      — reject
 
-Approve runs validate_for_execution (state may have drifted since the
-proposal was created) before "executing" via StubProposalDispatcher.
+Approve/reject logic lives in src/orders/service.py so the Telegram
+callback handler can share the same code path.
 """
 
 from fastapi import APIRouter, HTTPException, Request
 
-from src.orders.dispatcher import get_dispatcher
 from src.orders.models import Proposal
+from src.orders.service import approve_proposal as svc_approve, reject_proposal as svc_reject
 from src.orders.tracker import get_tracker
-from src.orders.validation import validate_for_execution
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -48,35 +47,18 @@ async def get_proposal(proposal_id: str):
 
 @router.post("/{proposal_id}/approve", response_model=Proposal)
 async def approve_proposal(request: Request, proposal_id: str):
-    tracker = get_tracker()
-    proposal = tracker.get(proposal_id)
-    if proposal is None:
-        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found")
-
-    ok, reason = tracker.approve(proposal_id)
-    if not ok:
-        raise HTTPException(status_code=400, detail=reason)
-
     ib = getattr(request.app.state, "ib", None)
-    result = validate_for_execution(proposal, tracker, ib)
+    result = await svc_approve(proposal_id, ib)
     if not result.ok:
-        tracker.mark_failed(proposal_id, result.reason)
-        raise HTTPException(status_code=400, detail=result.reason)
-
-    ib_order_id = await get_dispatcher().dispatch_execution(proposal)
-    tracker.mark_executed(proposal_id, ib_order_id)
-
-    return tracker.get(proposal_id)
+        status_code = 404 if result.proposal is None else 400
+        raise HTTPException(status_code=status_code, detail=result.reason)
+    return result.proposal
 
 
 @router.post("/{proposal_id}/reject", response_model=Proposal)
 async def reject_proposal(proposal_id: str):
-    tracker = get_tracker()
-    if tracker.get(proposal_id) is None:
-        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found")
-
-    ok, reason = tracker.reject(proposal_id)
-    if not ok:
-        raise HTTPException(status_code=400, detail=reason)
-
-    return tracker.get(proposal_id)
+    result = await svc_reject(proposal_id)
+    if not result.ok:
+        status_code = 404 if result.proposal is None else 400
+        raise HTTPException(status_code=status_code, detail=result.reason)
+    return result.proposal

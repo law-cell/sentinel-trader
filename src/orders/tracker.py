@@ -97,17 +97,17 @@ class ProposalTracker:
             return
         self._proposals[proposal_id].failure_reason = reason
 
-    def expire_stale(self) -> int:
-        """Move any PENDING proposal past its expires_at to EXPIRED. Returns count expired."""
+    def expire_stale(self) -> list[Proposal]:
+        """Move any PENDING proposal past its expires_at to EXPIRED. Returns expired proposals."""
         now = datetime.now()
-        count = 0
+        expired = []
         for proposal in self._proposals.values():
             if proposal.status == "PENDING" and proposal.expires_at <= now:
                 proposal.status = "EXPIRED"
-                count += 1
-        if count:
-            logger.info(f"Expired {count} stale proposal(s)")
-        return count
+                expired.append(proposal)
+        if expired:
+            logger.info(f"Expired {len(expired)} stale proposal(s)")
+        return expired
 
     # ─── Limits / duplicate checks ──────────────────────────────────────────
 
