@@ -7,11 +7,14 @@ terminal state (executed, rejected, expired, failed).
 """
 
 import itertools
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from loguru import logger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.orders.models import OptionOrderProposal, Proposal, StockOrderProposal
+
+DUBLIN_TZ = ZoneInfo("Europe/Dublin")
 
 _mock_order_ids = itertools.count(900001)
 
@@ -23,16 +26,19 @@ def _order_line(proposal: Proposal) -> str:
             line += f" @ ${proposal.limit_price:.2f}"
         return line
     if isinstance(proposal, OptionOrderProposal):
+        price_str = f"@ ${proposal.limit_price:.2f}" if proposal.limit_price is not None else "@ <pending>"
         return (
             f"SELL {proposal.quantity} {proposal.symbol} "
-            f"{proposal.expiry_date.isoformat()} {proposal.strike:g}{proposal.right}"
+            f"{proposal.expiry_date.isoformat()} {proposal.strike:g}{proposal.right} LIMIT {price_str}"
         )
     return "unknown"
 
 
 def _expiry_str(expires_at: datetime) -> str:
-    minutes_left = max(0, int((expires_at - datetime.now()).total_seconds() / 60))
-    return f"{expires_at.strftime('%H:%M')} (in {minutes_left} min)"
+    expires_utc = expires_at.replace(tzinfo=timezone.utc)
+    expires_local = expires_utc.astimezone(DUBLIN_TZ)
+    minutes_left = max(0, int((expires_utc - datetime.now(timezone.utc)).total_seconds() / 60))
+    return f"{expires_local.strftime('%H:%M')} (in {minutes_left} min)"
 
 
 def _format_pending(proposal: Proposal) -> str:
@@ -102,6 +108,11 @@ class TelegramProposalDispatcher:
         self._chat_id = chat_id
 
     async def dispatch(self, proposal: Proposal) -> None:
+        if isinstance(proposal, OptionOrderProposal) and proposal.limit_price is None:
+            from src.orders.pricing import get_option_mid_price
+            proposal.limit_price = await get_option_mid_price(
+                proposal.symbol, proposal.right, proposal.strike, proposal.expiry_date
+            )
         text = _format_pending(proposal)
         markup = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Approve", callback_data=f"proposal:{proposal.id}:approve"),
