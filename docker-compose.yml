@@ -36,6 +36,8 @@ services:
       - IB_PORT=${IB_PORT}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ./rules.json:/app/rules.json
     depends_on:
       - ib-gateway
     restart: unless-stopped
