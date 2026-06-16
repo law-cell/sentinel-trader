@@ -41,14 +41,26 @@ def _expiry_str(expires_at: datetime) -> str:
     return f"{expires_local.strftime('%H:%M')} (in {minutes_left} min)"
 
 
+def _format_body(proposal: Proposal) -> str:
+    """Shared body rendered identically across all proposal states.
+
+    Keeping rule, action line, notional, and trigger price in one place
+    makes it structurally impossible for a terminal-state format to drop
+    fields that were visible in PENDING.
+    """
+    return (
+        f"📌 <b>Rule:</b> {proposal.rule_name}\n"
+        f"📦 {_order_line(proposal)}\n"
+        f"💰 <b>Est. Notional:</b> ${proposal.estimated_notional_usd:,.2f}\n"
+        f"📍 <b>Trigger:</b> ${proposal.trigger_price:.2f}"
+    )
+
+
 def _format_pending(proposal: Proposal) -> str:
     return (
         f"📋 <b>Order Proposal — <code>{proposal.symbol}</code></b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📌 <b>Rule:</b> {proposal.rule_name}\n"
-        f"📦 {_order_line(proposal)}\n"
-        f"💰 <b>Est. Notional:</b> ${proposal.estimated_notional_usd:,.2f}\n"
-        f"📍 <b>Trigger:</b> ${proposal.trigger_price:.2f}\n"
+        f"{_format_body(proposal)}\n"
         f"⏰ <b>Expires:</b> {_expiry_str(proposal.expires_at)}"
     )
 
@@ -57,9 +69,7 @@ def _format_executed(proposal: Proposal) -> str:
     return (
         f"✅ <b>Order Executed — <code>{proposal.symbol}</code></b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📌 <b>Rule:</b> {proposal.rule_name}\n"
-        f"📦 {_order_line(proposal)}\n"
-        f"💰 <b>Est. Notional:</b> ${proposal.estimated_notional_usd:,.2f}\n"
+        f"{_format_body(proposal)}\n"
         f"🔖 <b>IB Order:</b> {proposal.ib_order_id}"
     )
 
@@ -68,8 +78,7 @@ def _format_rejected(proposal: Proposal) -> str:
     return (
         f"❌ <b>Order Rejected — <code>{proposal.symbol}</code></b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📌 <b>Rule:</b> {proposal.rule_name}\n"
-        f"📦 {_order_line(proposal)}"
+        f"{_format_body(proposal)}"
     )
 
 
@@ -77,8 +86,7 @@ def _format_expired(proposal: Proposal) -> str:
     return (
         f"⏰ <b>Order Expired — <code>{proposal.symbol}</code></b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📌 <b>Rule:</b> {proposal.rule_name}\n"
-        f"📦 {_order_line(proposal)}"
+        f"{_format_body(proposal)}"
     )
 
 
@@ -86,8 +94,7 @@ def _format_failed(proposal: Proposal) -> str:
     return (
         f"⚠️ <b>Execution Failed — <code>{proposal.symbol}</code></b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📌 <b>Rule:</b> {proposal.rule_name}\n"
-        f"📦 {_order_line(proposal)}\n"
+        f"{_format_body(proposal)}\n"
         f"❌ <b>Reason:</b> {proposal.failure_reason or 'unknown'}"
     )
 
