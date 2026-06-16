@@ -1,7 +1,8 @@
 """
 Telegram Notifier
 =================
-Sends trading alerts to a Telegram chat via Bot API using httpx (async).
+Sends trading alerts to a Telegram chat via python-telegram-bot (long-polling
+Application — no public URL required).
 
 Setup:
     1. Create a bot via @BotFather and copy the token
@@ -10,50 +11,57 @@ Setup:
     3. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env
 
 Usage:
-    notifier = TelegramNotifier(token="...", chat_id="...")
-    await notifier.send_message("Hello from SentinelTrader!")
-    await notifier.send_alert("NVDA Alert", "NVDA", "price > 150", 180.05)
+    app = TelegramApplication(token="...", chat_id="...")
+    await app.start()
+    await app.send_alert("NVDA Alert", "NVDA", "price > 150", 180.05)
+    await app.stop()
 """
 
 from datetime import datetime
-import httpx
 from loguru import logger
+from telegram.ext import Application
 
 
-_API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
-
-
-class TelegramNotifier:
-    """Async Telegram notification client (no external bot library required)."""
+class TelegramApplication:
+    """Wraps a python-telegram-bot Application running in long-polling mode."""
 
     def __init__(self, token: str, chat_id: str):
-        self.token = token
         self.chat_id = str(chat_id)
-        self._url = _API_BASE.format(token=token)
+        self.app = Application.builder().token(token).build()
+
+    async def start(self) -> None:
+        """Initialize, start, and begin long-polling. Call once on app startup."""
+        await self.app.initialize()
+        await self.app.start()
+        await self.app.updater.start_polling()
+        logger.info("Telegram polling started")
+
+    async def stop(self) -> None:
+        """Stop polling and shut down cleanly. Call once on app shutdown.
+
+        All three calls are required in this order — skipping any leaves
+        polling tasks half-alive, and Telegram rejects the next getUpdates
+        with "another instance is already polling" until it times out.
+        """
+        await self.app.updater.stop()
+        await self.app.stop()
+        await self.app.shutdown()
+        logger.info("Telegram polling stopped")
 
     async def send_message(self, text: str) -> bool:
         """
-        Send a plain or HTML-formatted message to the configured chat.
+        Send an HTML-formatted message to the configured chat.
 
         Returns True on success, False on failure (never raises).
         """
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(self._url, json=payload)
-                data = resp.json()
-                if data.get("ok"):
-                    return True
-                logger.error(f"Telegram API error: {data.get('description', data)}")
-                return False
-        except httpx.TimeoutException:
-            logger.error("Telegram send timed out")
-            return False
+            await self.app.bot.send_message(
+                chat_id=self.chat_id,
+                text=text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            return True
         except Exception as e:
             logger.error(f"Telegram send failed: {e}")
             return False
@@ -88,3 +96,29 @@ class TelegramNotifier:
         if success:
             logger.info(f"Telegram alert sent: rule='{rule_name}' symbol={symbol}")
         return success
+
+
+# ─── Lazy singleton ────────────────────────────────────────────────────────
+# Mirrors get_tracker()/get_dispatcher() so rule actions (which run outside
+# any Request context) can reach the shared TelegramApplication instance.
+
+_telegram_app: TelegramApplication | None = None
+_telegram_app_checked = False
+
+
+def get_telegram_app() -> TelegramApplication | None:
+    global _telegram_app, _telegram_app_checked
+    if _telegram_app_checked:
+        return _telegram_app
+    _telegram_app_checked = True
+
+    from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        _telegram_app = TelegramApplication(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+        logger.info("Telegram application initialised")
+    else:
+        logger.warning(
+            "Telegram not configured — set TELEGRAM_BOT_TOKEN and "
+            "TELEGRAM_CHAT_ID in .env to enable Telegram alerts"
+        )
+    return _telegram_app

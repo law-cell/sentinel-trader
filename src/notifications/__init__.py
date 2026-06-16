@@ -1,1 +1,1 @@
-from src.notifications.telegram import TelegramNotifier
+from src.notifications.telegram import TelegramApplication, get_telegram_app
