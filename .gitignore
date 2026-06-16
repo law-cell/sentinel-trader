@@ -35,3 +35,10 @@ Thumbs.db
 
 # IB
 *.ibc
+
+# Backups
+*.bak
+*.backup
+
+# Local test fixtures
+rules.json.bak
