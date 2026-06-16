@@ -13,14 +13,31 @@ Two dispatch layers, called when a rule's condition is satisfied:
        (rule_name: str, symbol: str, ticker: Ticker) -> None
 
 2. Action dispatch (execute_rule_action) — WHAT happens on trigger, based on
-   rule.action.type ("alert", "propose_stock_order", "propose_option_order").
-   "alert" delegates to the rule's channel. Order-proposal types are stubs
-   until order execution lands.
+   rule.action.type:
+    "alert"                 Send an alert via the rule's channel.
+    "propose_stock_order"   Build a StockOrderProposal, validate it, and
+                            (if it passes) hand it to the proposal tracker
+                            and dispatcher for user approval.
+    "propose_option_order"  Same, but for an OptionOrderProposal — fetches
+                            an option premium estimate first.
+
+   If a proposal fails pre-trade validation, the user is notified via a
+   degraded alert ("Rule X triggered but blocked: <reason>") instead of
+   silently dropping the trigger.
 """
 
 import asyncio
+import uuid
+from datetime import date, datetime, timedelta
 from ib_async import Ticker
 from loguru import logger
+
+from src.config.settings import PROPOSAL_EXPIRY_SECONDS
+from src.orders.dispatcher import get_dispatcher
+from src.orders.models import OptionOrderProposal, Proposal, StockOrderProposal
+from src.orders.pricing import get_option_mid_price
+from src.orders.tracker import get_tracker
+from src.orders.validation import validate_for_proposal
 
 
 # ─── ANSI color helpers ───────────────────────────────────────────────────────
@@ -30,6 +47,7 @@ _BOLD   = "\033[1m"
 _YELLOW = "\033[33m"
 _CYAN   = "\033[36m"
 _GREEN  = "\033[32m"
+_RED    = "\033[31m"
 
 
 def _price_str(ticker: Ticker) -> str:
@@ -46,30 +64,16 @@ def _vol_str(ticker: Ticker) -> str:
     return f"{vol:,.0f}" if vol and vol > 0 else "N/A"
 
 
-# ─── Lazy Telegram notifier singleton ────────────────────────────────────────
-# Initialised on first use; None if env vars are not set.
-
-_notifier = None
-_notifier_checked = False
+from src.notifications.telegram import get_telegram_app
 
 
-def _get_notifier():
-    global _notifier, _notifier_checked
-    if _notifier_checked:
-        return _notifier
-    _notifier_checked = True
-
-    from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        from src.notifications.telegram import TelegramNotifier
-        _notifier = TelegramNotifier(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-        logger.info("Telegram notifier initialised")
-    else:
-        logger.warning(
-            "Telegram not configured — set TELEGRAM_BOT_TOKEN and "
-            "TELEGRAM_CHAT_ID in .env to enable Telegram alerts"
-        )
-    return _notifier
+def _fire_and_forget(coro) -> None:
+    """Schedule a coroutine on the running loop, or run it if there is none."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        asyncio.run(coro)
 
 
 # ─── Action implementations ───────────────────────────────────────────────────
@@ -100,25 +104,16 @@ def telegram_action(rule_name: str, symbol: str, ticker: Ticker) -> None:
     """
     Send a Telegram alert for a triggered rule.
 
-    The HTTP request is fire-and-forget: it is scheduled as an asyncio Task
-    on the running event loop so it never blocks the rule engine tick handler.
+    Scheduled as a fire-and-forget asyncio Task so it never blocks
+    the rule engine tick handler.
     """
-    notifier = _get_notifier()
-    if notifier is None:
+    tg = get_telegram_app()
+    if tg is None:
         return
 
     price = _price_float(ticker)
     condition_desc = f"price = {_price_str(ticker)}"
-
-    coro = notifier.send_alert(rule_name, symbol, condition_desc, price)
-
-    try:
-        # We're inside the ib_async event loop — schedule without awaiting
-        loop = asyncio.get_running_loop()
-        loop.create_task(coro)
-    except RuntimeError:
-        # No running loop (e.g. called from a test outside async context)
-        asyncio.run(coro)
+    _fire_and_forget(tg.send_alert(rule_name, symbol, condition_desc, price))
 
 
 # notify is kept as an alias so existing rules.json entries still work
@@ -153,42 +148,125 @@ def dispatch_channel(channel_name: str, rule_name: str, symbol: str, ticker: Tic
         logger.error(f"Channel '{channel_name}' failed for rule '{rule_name}': {e}")
 
 
+def dispatch_degraded_alert(channel_name: str, rule_name: str, symbol: str, ticker: Ticker, reason: str) -> None:
+    """
+    Notify the user that a rule fired but its order proposal was blocked by
+    pre-trade validation. Always logged (regardless of channel) since this is
+    a safety-relevant event; additionally sent over the rule's channel when
+    that channel supports a custom message (console, telegram/notify).
+    """
+    message = f"Rule '{rule_name}' triggered but blocked: {reason}"
+    logger.warning(message)
+
+    if channel_name == "console":
+        line = f"{_BOLD}{_RED}>>> BLOCKED{_RESET}  {_BOLD}{_CYAN}{symbol}{_RESET}  {message}"
+        print(line, flush=True)
+    elif channel_name in ("telegram", "notify"):
+        tg = get_telegram_app()
+        if tg is None:
+            return
+        price = _price_float(ticker)
+        _fire_and_forget(tg.send_alert(rule_name, symbol, f"⚠️ Blocked: {reason}", price))
+
+
 # ─── Action dispatch ──────────────────────────────────────────────────────────
 # What happens when a rule's condition fires. "alert" sends a notification via
-# the rule's channel. Order-proposal actions are stubs until execution lands
-# (see Sunday scope) — they currently just alert via the channel.
+# the rule's channel. Order-proposal actions build a Proposal, run pre-trade
+# validation, and either hand it off for approval or send a degraded alert.
 
-def _handle_alert(rule, symbol: str, ticker: Ticker) -> None:
+async def _handle_alert(rule, symbol: str, ticker: Ticker, ib=None) -> Proposal | None:
     dispatch_channel(rule.channel, rule.name, symbol, ticker)
+    return None
 
 
-def _handle_stock_order_stub(rule, symbol: str, ticker: Ticker) -> None:
-    logger.warning(
-        f"Rule '{rule.name}' triggered a propose_stock_order action — "
-        "order proposals are not yet implemented; sending alert instead"
+async def _handle_stock_order_proposal(rule, symbol: str, ticker: Ticker, ib=None) -> Proposal | None:
+    action = rule.action  # StockOrderAction
+    price = _price_float(ticker)
+    notional = action.quantity * (action.limit_price if action.limit_price is not None else price)
+
+    now = datetime.now()
+    proposal = StockOrderProposal(
+        id=str(uuid.uuid4()),
+        rule_id=rule.name,
+        rule_name=rule.name,
+        symbol=symbol,
+        created_at=now,
+        expires_at=now + timedelta(seconds=PROPOSAL_EXPIRY_SECONDS),
+        status="PENDING",
+        estimated_notional_usd=notional,
+        trigger_price=price,
+        side=action.side,
+        quantity=action.quantity,
+        order_type=action.order_type,
+        limit_price=action.limit_price,
     )
-    dispatch_channel(rule.channel, rule.name, symbol, ticker)
+
+    tracker = get_tracker()
+    result = validate_for_proposal(proposal, tracker, ib)
+    if not result.ok:
+        dispatch_degraded_alert(rule.channel, rule.name, symbol, ticker, result.reason)
+        return None
+
+    tracker.create(proposal)
+    await get_dispatcher().dispatch(proposal)
+    return proposal
 
 
-def _handle_option_order_stub(rule, symbol: str, ticker: Ticker) -> None:
-    logger.warning(
-        f"Rule '{rule.name}' triggered a propose_option_order action — "
-        "order proposals are not yet implemented; sending alert instead"
+async def _handle_option_order_proposal(rule, symbol: str, ticker: Ticker, ib=None) -> Proposal | None:
+    action = rule.action  # OptionOrderAction
+    price = _price_float(ticker)
+    expiry_date = date.today() + timedelta(days=action.expiry_days)
+
+    premium = await get_option_mid_price(symbol, action.right, action.strike, expiry_date)
+    notional = action.quantity * premium * 100
+
+    now = datetime.now()
+    proposal = OptionOrderProposal(
+        id=str(uuid.uuid4()),
+        rule_id=rule.name,
+        rule_name=rule.name,
+        symbol=symbol,
+        created_at=now,
+        expires_at=now + timedelta(seconds=PROPOSAL_EXPIRY_SECONDS),
+        status="PENDING",
+        estimated_notional_usd=notional,
+        trigger_price=price,
+        right=action.right,
+        strike=action.strike,
+        expiry_date=expiry_date,
+        quantity=action.quantity,
     )
-    dispatch_channel(rule.channel, rule.name, symbol, ticker)
+
+    tracker = get_tracker()
+    result = validate_for_proposal(proposal, tracker, ib)
+    if not result.ok:
+        dispatch_degraded_alert(rule.channel, rule.name, symbol, ticker, result.reason)
+        return None
+
+    tracker.create(proposal)
+    await get_dispatcher().dispatch(proposal)
+    return proposal
 
 
 _ACTION_HANDLERS = {
-    "alert":                 _handle_alert,
-    "propose_stock_order":   _handle_stock_order_stub,
-    "propose_option_order":  _handle_option_order_stub,
+    "alert":                _handle_alert,
+    "propose_stock_order":  _handle_stock_order_proposal,
+    "propose_option_order": _handle_option_order_proposal,
 }
 
 
-def execute_rule_action(rule, symbol: str, ticker: Ticker) -> None:
+async def execute_rule_action(rule, symbol: str, ticker: Ticker, ib=None) -> Proposal | None:
     """
-    Dispatch on rule.action.type. Falls back to alert behaviour if the
-    action type is unrecognised.
+    Dispatch on rule.action.type. Returns the created Proposal for
+    propose_*_order actions that passed validation, otherwise None
+    (alert actions, or proposals blocked by validation).
+
+    Logs an error (without raising) if the action type is unrecognised —
+    should be unreachable since `Action` is a discriminated union, but
+    guards against future schema additions.
     """
-    handler = _ACTION_HANDLERS.get(rule.action.type, _handle_alert)
-    handler(rule, symbol, ticker)
+    handler = _ACTION_HANDLERS.get(rule.action.type)
+    if handler is None:
+        logger.error(f"Unknown action type '{rule.action.type}' for rule '{rule.name}' — no action taken")
+        return None
+    return await handler(rule, symbol, ticker, ib)

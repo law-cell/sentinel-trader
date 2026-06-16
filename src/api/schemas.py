@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator, model_validator
 
 from src.rules.models import Action
+from src.orders.models import Proposal
 
 _ALLOWED_CHANNELS = {"log", "console", "telegram", "notify"}
 
@@ -99,6 +100,18 @@ class TriggerEvent(BaseModel):
     rule_name: str
     symbol: str
     price: float
+
+
+class TriggerTestRequest(BaseModel):
+    mock_price: float
+
+
+class TriggerTestResponse(BaseModel):
+    matched: bool
+    rule_name: str
+    symbol: str
+    mock_price: float
+    proposal: Proposal | None = None
 
 
 # ─── Symbol search ────────────────────────────────────────────────────────────

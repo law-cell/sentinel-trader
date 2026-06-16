@@ -11,12 +11,17 @@ Endpoints:
     DELETE /api/rules/{name}    — delete a rule
 """
 
+from datetime import datetime
 from pathlib import Path
+from ib_async import Ticker
 from fastapi import APIRouter, HTTPException, Request
 
+from src.config.settings import ENABLE_TEST_TRIGGER
+from src.rules.actions import execute_rule_action
+from src.rules.conditions import evaluate_condition
 from src.rules.models import Rule
 from src.rules.loader import save_rules_to_file
-from src.api.schemas import RuleCreate, RuleUpdate, RuleResponse, TriggerEvent
+from src.api.schemas import RuleCreate, RuleUpdate, RuleResponse, TriggerEvent, TriggerTestRequest, TriggerTestResponse
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
 
@@ -113,3 +118,61 @@ async def delete_rule(request: Request, name: str):
         raise HTTPException(status_code=404, detail=f"Rule '{name}' not found")
 
     save_rules_to_file(engine.all_rules, RULES_FILE)
+
+
+# ─── Test trigger (QA only) ────────────────────────────────────────────────
+# Only registered when ENABLE_TEST_TRIGGER=true (.env). Lets QA pretend a
+# rule's symbol just ticked at `mock_price` and runs the full trigger code
+# path (condition check, cooldown, action dispatch / proposal creation) —
+# the only way to exercise the proposal flow without waiting for real
+# market conditions. Disabled by default so it doesn't exist in production.
+
+if ENABLE_TEST_TRIGGER:
+
+    @router.post("/{rule_id}/trigger-test", response_model=TriggerTestResponse)
+    async def trigger_test(request: Request, rule_id: str, body: TriggerTestRequest):
+        """Pretend `rule_id`'s symbol just ticked at `mock_price` and evaluate it."""
+        engine = request.app.state.engine
+
+        rule = engine.find_rule(rule_id)
+        if rule is None:
+            raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
+
+        ticker = Ticker(
+            contract=None,
+            # created=True bypasses Ticker.__post_init__, which otherwise
+            # resets last/bid/ask/close back to NaN ("unset") regardless of
+            # constructor args.
+            created=True,
+            last=body.mock_price,
+            close=body.mock_price,
+            ask=body.mock_price,
+            bid=body.mock_price,
+            volume=0,
+        )
+
+        matched = evaluate_condition(ticker, rule.condition)
+
+        proposal = None
+        if matched:
+            if rule.is_on_cooldown():
+                raise HTTPException(status_code=409, detail=f"Rule '{rule.name}' is on cooldown")
+
+            rule.mark_triggered()
+            ib = getattr(request.app.state, "ib", None)
+            proposal = await execute_rule_action(rule, rule.symbol, ticker, ib)
+
+            engine.trigger_history.appendleft({
+                "timestamp": datetime.now().isoformat(),
+                "rule_name": rule.name,
+                "symbol": rule.symbol,
+                "price": body.mock_price,
+            })
+
+        return TriggerTestResponse(
+            matched=matched,
+            rule_name=rule.name,
+            symbol=rule.symbol,
+            mock_price=body.mock_price,
+            proposal=proposal,
+        )

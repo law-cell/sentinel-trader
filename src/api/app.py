@@ -29,13 +29,25 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from src.core.connection import IBConnection
+from src.notifications.telegram import get_telegram_app
+from src.orders.tracker import get_tracker
 from src.rules.engine import RuleEngine
 from src.api.routes import rules as rules_router
 from src.api.routes import llm_rules as llm_rules_router
+from src.api.routes import proposals as proposals_router
 from src.api.routes import account as account_router
 
 RULES_FILE = Path("rules.json")
 STATIC_DIR = Path("web/dist")
+PROPOSAL_EXPIRY_CHECK_INTERVAL_SECONDS = 30
+
+
+async def _periodic_expiry() -> None:
+    """Expire stale PENDING proposals every 30s, for users who never click approve/reject."""
+    tracker = get_tracker()
+    while True:
+        await asyncio.sleep(PROPOSAL_EXPIRY_CHECK_INTERVAL_SECONDS)
+        tracker.expire_stale()
 
 
 @asynccontextmanager
@@ -69,6 +81,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(conn._reconnect_loop())
     ib = conn.ib  # always non-None; use ib.isConnected() to check live status
 
+    tg = get_telegram_app()
+    if tg is not None:
+        await tg.start()
+
     if RULES_FILE.exists():
         engine.load_rules(RULES_FILE)
 
@@ -77,6 +93,9 @@ async def lifespan(app: FastAPI):
         logger.info("Rule engine started as background task")
     else:
         logger.warning("IB not connected at startup — engine will start on reconnect")
+
+    expiry_task = asyncio.create_task(_periodic_expiry())
+    logger.info("Proposal expiry background task started (every 30s)")
 
     # Expose shared state to all request handlers via app.state
     app.state.ib = ib
@@ -88,12 +107,21 @@ async def lifespan(app: FastAPI):
     yield  # ── Serving requests ──────────────────────────────────────────────
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
+    expiry_task.cancel()
+    try:
+        await expiry_task
+    except asyncio.CancelledError:
+        pass
+
     if engine_task and not engine_task.done():
         engine_task.cancel()
         try:
             await engine_task
         except asyncio.CancelledError:
             pass
+
+    if tg is not None:
+        await tg.stop()
 
     conn.disconnect()
     logger.info("API server stopped")
@@ -121,6 +149,7 @@ app.add_middleware(
 
 app.include_router(rules_router.router)
 app.include_router(llm_rules_router.router)
+app.include_router(proposals_router.router)
 app.include_router(account_router.router)
 
 

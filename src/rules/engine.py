@@ -38,6 +38,7 @@ class RuleEngine:
     def __init__(self):
         self._rules: dict[str, list[Rule]] = {}
         self._stream: MarketDataStream | None = None
+        self._ib: IB | None = None
         # Ring buffer — last 100 trigger events, newest first
         self.trigger_history: deque = deque(maxlen=100)
 
@@ -127,7 +128,12 @@ class RuleEngine:
             if evaluate_condition(ticker, rule.condition):
                 logger.success(f"Rule '{rule.name}' triggered for {symbol}")
                 rule.mark_triggered()
-                execute_rule_action(rule, symbol, ticker)
+
+                # execute_rule_action is async (may build/validate/dispatch an
+                # order proposal); evaluate() is called from a sync ib_async
+                # event callback, so fire-and-forget it as a task — same
+                # pattern as telegram_action's notification send.
+                asyncio.create_task(execute_rule_action(rule, symbol, ticker, self._ib))
 
                 raw = ticker.last or ticker.close
                 price = float(raw) if raw and not math.isnan(float(raw)) else 0.0
@@ -150,6 +156,7 @@ class RuleEngine:
         """
         active_symbols = [s for s in symbols if s in self._rules]
 
+        self._ib = ib
         stream = MarketDataStream(ib)
         self._stream = stream  # set before any await so subscribe_symbol() is usable
 
@@ -180,6 +187,7 @@ class RuleEngine:
             ib.pendingTickersEvent -= on_pending_tickers
             stream.unsubscribe_all()
             self._stream = None
+            self._ib = None
             logger.info("Rule engine stopped")
 
 
