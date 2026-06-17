@@ -6,6 +6,16 @@ Runs locally via `docker-compose` with IB Gateway as a sidecar container. Two Cl
 
 ---
 
+## Rule creation
+
+Describe what you want to monitor in natural language; Claude parses it into a structured rule that you can review and adjust before saving.
+
+![Natural-language rule creation](docs/screenshots/llm-rule-creation.png)
+
+The same rule could be written via REST API or the React form — Claude's parsing layer just makes it accessible without learning the schema.
+
+---
+
 ## How it works
 
 ### Flow A — LLM rule creation
