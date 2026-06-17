@@ -18,6 +18,8 @@ The same rule could be written via REST API or the React form — Claude's parsi
 
 ## How it works
 
+![Proposal lifecycle](docs/screenshots/proposal-lifecycle.png)
+
 ### Flow A — LLM rule creation
 
 ```mermaid
@@ -62,8 +64,6 @@ flowchart LR
     TICK["_periodic_expiry\nevery 30 s"] -->|expires_at passed| TR["ProposalTracker\nstatus=PENDING → EXPIRED"]
     TR --> EDIT["edit_message_text\n⏰ Order Expired · buttons removed"]
 ```
-
-![Proposal lifecycle](docs/screenshots/proposal-lifecycle.png)
 
 ---
 
