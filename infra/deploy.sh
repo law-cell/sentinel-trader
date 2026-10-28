@@ -59,6 +59,7 @@ TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 TWS_USERID="${TWS_USERID:-}"
 TWS_PASSWORD="${TWS_PASSWORD:-}"
 TRADING_MODE="${TRADING_MODE:-paper}"
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ echo "================================================"
 
 [[ -z "${TWS_USERID}" ]] && die "TWS_USERID is not set. Add it to .env or export it."
 [[ -z "${TWS_PASSWORD}" ]] && die "TWS_PASSWORD is not set. Add it to .env or export it."
+[[ -z "${ANTHROPIC_API_KEY}" ]] && die "ANTHROPIC_API_KEY is not set. Add it to .env or export it."
 
 # ─── Step 1: Ensure ECR repository exists ─────────────────────────────────────
 
@@ -155,6 +157,7 @@ aws cloudformation deploy \
     TelegramChatId="${TELEGRAM_CHAT_ID}" \
     TwsUserId="${TWS_USERID}" \
     TwsPassword="${TWS_PASSWORD}" \
+    AnthropicApiKey="${ANTHROPIC_API_KEY}" \
     TradingMode="${TRADING_MODE}" \
     IbPort="$([ "${TRADING_MODE}" = "live" ] && echo 4001 || echo 4002)" \
   --no-fail-on-empty-changeset

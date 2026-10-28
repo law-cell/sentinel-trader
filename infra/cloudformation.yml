@@ -22,6 +22,11 @@ Parameters:
     Default: ''
     Description: Telegram chat ID for trade notifications (optional)
 
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: Anthropic API key for natural-language rule creation (Create with AI)
+
   TwsUserId:
     Type: String
     Description: Interactive Brokers username (TWS_USERID)
@@ -191,6 +196,9 @@ Resources:
               Value: !Ref TwsPassword
             - Name: TRADING_MODE
               Value: !Ref TradingMode
+            # Gateway defaults to a read-only API, which rejects order placement
+            - Name: READ_ONLY_API
+              Value: 'no'
             # On 2FA timeout: restart IB Gateway instead of exiting
             - Name: TWOFA_TIMEOUT_ACTION
               Value: restart
@@ -230,6 +238,8 @@ Resources:
               Value: !Sub '${IbPort}'
             - Name: IB_CLIENT_ID
               Value: !Sub '${IbClientId}'
+            - Name: ANTHROPIC_API_KEY
+              Value: !Ref AnthropicApiKey
             - Name: TELEGRAM_BOT_TOKEN
               Value: !Ref TelegramBotToken
             - Name: TELEGRAM_CHAT_ID

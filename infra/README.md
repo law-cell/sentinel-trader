@@ -6,6 +6,12 @@
 |---|---|
 | `cloudformation.yml` | **Plan B** — No ALB. Task gets a dynamic public IP. IB Gateway sidecar included. |
 | `cloudformation-production.yml` | **Production** — ALB + HTTPS + ACM certificate + Route 53. Stable URL, TLS. |
+| `terraform/` | **Plan B in Terraform** — same resources as `cloudformation.yml`, plus the ECR repository. |
+
+> **Deploy with one method at a time.** The CloudFormation and Terraform versions use the
+> same resource names (ECS cluster/service `sentinel-trader`, IAM role, log group), so the
+> second one fails with "already exists" while the first is up. Tear one down before
+> switching to the other. Infrastructure changes must be made in both.
 
 ### Container layout
 
@@ -164,6 +170,73 @@ The ECR repository is managed separately — delete it manually if needed:
 ```bash
 aws ecr delete-repository --repository-name sentinel-trader --force --region eu-west-1
 ```
+
+---
+
+## Plan B Deployment with Terraform (terraform/)
+
+Same architecture as `cloudformation.yml`. State is stored in the S3 bucket
+`sentinel-trader-tfstate-073356057418` (eu-west-1, versioned, S3-native locking).
+That bucket is not managed by Terraform — never delete it.
+
+### Prerequisites
+
+1. **Terraform** >= 1.10
+2. **AWS CLI** configured (`aws configure`), region `eu-west-1`
+3. **Docker** running
+4. No CloudFormation `sentinel-trader` stack deployed (see note at the top)
+
+### Steps
+
+```bash
+cd infra/terraform
+cp terraform.tfvars.example terraform.tfvars   # fill in TWS_USERID / TWS_PASSWORD (git-ignored)
+terraform init
+
+# 1. Create the ECR repository first — the image must exist before the service starts
+terraform apply -target=aws_ecr_repository.app
+
+# 2. Build and push the image
+REPO=$(terraform output -raw ecr_repository_url)
+aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin "${REPO%%/*}"
+docker build --platform linux/amd64 -t "$REPO:latest" ../..
+docker push "$REPO:latest"
+
+# 3. Create everything else
+terraform apply
+```
+
+Then approve the IBKR Mobile 2FA push and find the task IP as described in
+"Finding the current task IP manually" above.
+
+### Updating the app
+
+Push a new image, then force a new deployment (Terraform sees no change when the tag stays `latest`):
+
+```bash
+aws ecs update-service --cluster sentinel-trader --service sentinel-trader \
+  --force-new-deployment --region eu-west-1
+```
+
+Alternatively push with a unique tag (e.g. the git SHA) and run
+`terraform apply -var image_tag=<sha>`, which rolls out a new task definition.
+
+### Secrets
+
+`tws_password` and `telegram_bot_token` are marked sensitive, so they are hidden in plan
+output, but — exactly like the CloudFormation version — they are passed to the containers
+as plain environment variables and are stored in the state file. The state bucket is
+encrypted and private; keep it that way.
+
+### Tear down
+
+```bash
+terraform destroy
+```
+
+Unlike the CloudFormation flow, this also deletes the ECR repository (it fails if the
+repository still contains images — delete them first or keep the repo with
+`terraform state rm aws_ecr_repository.app`).
 
 ---
 
