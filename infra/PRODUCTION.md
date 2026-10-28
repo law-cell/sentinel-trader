@@ -175,6 +175,7 @@ aws cloudformation deploy \
     TwsUserId=$TWS_USERID \
     TwsPassword=$TWS_PASSWORD \
     TradingMode=paper \
+    AnthropicApiKey=$ANTHROPIC_API_KEY \
     TelegramBotToken=$TELEGRAM_BOT_TOKEN \
     TelegramChatId=$TELEGRAM_CHAT_ID \
     EnableWAF=false

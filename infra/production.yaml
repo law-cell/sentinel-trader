@@ -18,6 +18,11 @@ Parameters:
 
   # ── IB Gateway / app ────────────────────────────────────────────────────────
 
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: Anthropic API key for natural-language rule creation (Create with AI)
+
   TwsUserId:
     Type: String
     Description: Interactive Brokers username
@@ -330,6 +335,9 @@ Resources:
               Value: !Ref TwsPassword
             - Name: TRADING_MODE
               Value: !Ref TradingMode
+            # Gateway defaults to a read-only API, which rejects order placement
+            - Name: READ_ONLY_API
+              Value: 'no'
             - Name: TWOFA_TIMEOUT_ACTION
               Value: restart
             - Name: RELOGIN_AFTER_TWOFA_TIMEOUT
@@ -364,6 +372,8 @@ Resources:
               Value: !Sub '${IbPort}'
             - Name: IB_CLIENT_ID
               Value: !Sub '${IbClientId}'
+            - Name: ANTHROPIC_API_KEY
+              Value: !Ref AnthropicApiKey
             - Name: TELEGRAM_BOT_TOKEN
               Value: !Ref TelegramBotToken
             - Name: TELEGRAM_CHAT_ID

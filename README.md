@@ -2,7 +2,7 @@
 
 A trading assistant that connects to Interactive Brokers via the TWS API. Real-time market data streams into an event-driven rule engine; rules can either fire Telegram alerts or generate order proposals requiring explicit approval before execution. Order proposals are delivered as Telegram messages with inline ✅ / ❌ buttons; the human taps approve, a 10-check validation pipeline runs, and a stub executor logs "WOULD EXECUTE" — wired for `ib.placeOrder()` in the next commit. Rules can be written via REST, a React UI, or plain English: a `/api/rules/from-nl` endpoint sends the user's prompt to the Claude API and validates the structured result before persisting.
 
-Runs locally via `docker-compose` with IB Gateway as a sidecar container. Two CloudFormation configurations cover cost-optimised and production-grade AWS deployment — both have been deployed and validated; infrastructure is spun down for cost discipline and redeploys in under 20 minutes.
+Runs locally via `docker-compose` with IB Gateway as a sidecar container. Two CloudFormation configurations cover cost-optimised and production-grade AWS deployment, and the cost-optimised one is also available as Terraform — all have been deployed and validated; infrastructure is spun down for cost discipline and redeploys in under 20 minutes.
 
 ---
 
@@ -76,7 +76,7 @@ flowchart LR
         LA -->|localhost:4002| LG[IB Gateway :4002]
     end
 
-    subgraph dev["Cost-Optimised AWS — approx 18 EUR/mo"]
+    subgraph dev["Cost-Optimised AWS (CloudFormation or Terraform) — approx 18 EUR/mo"]
         DI[Internet :8000]
         subgraph devtask["ECS Task / public IP"]
             DS[sentinel-trader :8000]
@@ -95,7 +95,7 @@ flowchart LR
     end
 ```
 
-**Currently runs locally via `docker-compose`.** Both AWS configurations were deployed and validated on ECS Fargate (eu-west-1); infrastructure spun down for cost. Redeploys in under 20 minutes via `aws cloudformation deploy` (allow 3 additional minutes for IB Gateway 2FA approval on first login). See [`infra/PRODUCTION.md`](infra/PRODUCTION.md) for architecture comparison and cost breakdown.
+**Currently runs locally via `docker-compose`.** Both AWS configurations were deployed and validated on ECS Fargate (eu-west-1); infrastructure spun down for cost. Redeploys in under 20 minutes via `aws cloudformation deploy` or `terraform apply` (allow 3 additional minutes for IB Gateway 2FA approval on first login). See [`infra/PRODUCTION.md`](infra/PRODUCTION.md) for architecture comparison and cost breakdown.
 
 ---
 
@@ -189,6 +189,8 @@ Two design decisions worth noting:
 
 Both templates run IB Gateway as a sidecar container in the same ECS Task. In Fargate's `awsvpc` network mode, all containers in a task share one network namespace, so `sentinel-trader` connects to IB Gateway at `127.0.0.1:4002` — no port exposure outside the task required. The `deploy.sh` script handles ECR image build, push, and CloudFormation stack update in a single command.
 
+[`infra/terraform/`](infra/terraform/) is a Terraform port of the cost-optimised template, with remote state in S3 and the ECR repository managed as code. It uses the same resource names as `cloudformation.yml`, so only one of the two is deployed at a time.
+
 See [`infra/PRODUCTION.md`](infra/PRODUCTION.md) for full architecture diagrams and cost breakdown.
 
 ### IB client ID scaling constraint
@@ -207,6 +209,7 @@ The order proposal subsystem ships with 54 unit tests across [`tests/test_propos
 |---|---|---|---|
 | Local | `docker compose up --build` | Free | Primary demo path |
 | Cost-Optimised AWS | `bash infra/deploy.sh` | ~€18/mo | Validated, spun down |
+| Cost-Optimised AWS (Terraform) | `terraform apply` in [`infra/terraform/`](infra/terraform/) | ~€18/mo | Validated |
 | Production AWS | See [`infra/PRODUCTION.md`](infra/PRODUCTION.md) | ~€35–40/mo | Validated, spun down |
 
 Full AWS setup instructions, log access commands, and tear-down steps are in [`infra/README.md`](infra/README.md).

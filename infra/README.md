@@ -5,7 +5,8 @@
 | Template | Description |
 |---|---|
 | `cloudformation.yml` | **Plan B** — No ALB. Task gets a dynamic public IP. IB Gateway sidecar included. |
-| `cloudformation-production.yml` | **Production** — ALB + HTTPS + ACM certificate + Route 53. Stable URL, TLS. |
+| `production.yaml` | **Production** — ALB + HTTPS + ACM certificate + Route 53, multi-AZ, auto-scaling, optional WAF. Stable URL, TLS. |
+| `cloudformation-production.yml` | *Superseded by `production.yaml`* — older version without IB Gateway credentials; kept for reference only. |
 | `terraform/` | **Plan B in Terraform** — same resources as `cloudformation.yml`, plus the ECR repository. |
 
 > **Deploy with one method at a time.** The CloudFormation and Terraform versions use the
@@ -30,12 +31,14 @@ ECS Task
 
 ### Credentials
 
-Set these in `.env` or export them before running `deploy.sh`:
+Set these in `.env` or export them before running `deploy.sh`
+(for Terraform, put the lowercase equivalents in `terraform/terraform.tfvars`):
 
 ```bash
 TWS_USERID=your_ib_username      # your IB account username
 TWS_PASSWORD=your_ib_password    # your IB account password
 TRADING_MODE=paper               # paper or live
+ANTHROPIC_API_KEY=sk-ant-...     # required for Create with AI (/api/rules/from-nl)
 ```
 
 ### 2FA (Two-Factor Authentication)
@@ -257,7 +260,9 @@ Approve the IBKR Mobile 2FA notification when prompted.
 
 ---
 
-## Production Deployment (cloudformation-production.yml)
+## Production Deployment (production.yaml)
+
+Architecture, auto-scaling, WAF and cost details are in [PRODUCTION.md](PRODUCTION.md).
 
 ### Additional prerequisites
 
@@ -277,7 +282,7 @@ Add the CNAME validation record to Route 53 and wait for `ISSUED` status.
 
 ```bash
 aws cloudformation deploy \
-  --template-file infra/cloudformation-production.yml \
+  --template-file infra/production.yaml \
   --stack-name sentinel-trader-prod \
   --capabilities CAPABILITY_NAMED_IAM \
   --region eu-west-1 \
@@ -289,8 +294,10 @@ aws cloudformation deploy \
     TwsUserId=$TWS_USERID \
     TwsPassword=$TWS_PASSWORD \
     TradingMode=paper \
+    AnthropicApiKey=$ANTHROPIC_API_KEY \
     TelegramBotToken=$TELEGRAM_BOT_TOKEN \
-    TelegramChatId=$TELEGRAM_CHAT_ID
+    TelegramChatId=$TELEGRAM_CHAT_ID \
+    EnableWAF=false
 ```
 
 Access at: `https://trading.example.com`
