@@ -68,9 +68,16 @@ async def lifespan(app: FastAPI):
     # Register reconnect callback before the initial connect attempt so it is
     # in place whether the first connect succeeds, fails, or races to reconnect.
     async def on_reconnect(ib_instance) -> None:
+        nonlocal engine_task
         ib_instance.reqMarketDataType(1)
         logger.info("Reconnect callback: set market data type to real-time")
-        if engine._stream is not None:
+        # IB was down at startup (e.g. IB Gateway still logging in on ECS) or the
+        # engine task has exited — start it now instead of only resubscribing.
+        if engine_task is None or engine_task.done():
+            engine_task = asyncio.create_task(engine.run(ib_instance, engine.symbols))
+            app.state.engine_task = engine_task
+            logger.info("Reconnect callback: rule engine started")
+        elif engine._stream is not None:
             await engine._stream.resubscribe_all()
             logger.info("Reconnect callback: resubscribed all market data streams")
 
