@@ -78,7 +78,7 @@ TELEGRAM_CHAT_ID=...     # optional
 #### 2. Run the deploy script
 
 ```bash
-export AWS_REGION=us-east-1
+export AWS_REGION=eu-west-1
 bash infra/deploy.sh
 ```
 
@@ -115,7 +115,7 @@ aws ecs update-service \
   --cluster sentinel-trader \
   --service sentinel-trader \
   --force-new-deployment \
-  --region us-east-1
+  --region eu-west-1
 ```
 
 ---
@@ -156,13 +156,13 @@ aws logs tail /ecs/sentinel-trader --log-stream-name-prefix sentinel-trader --fo
 ### Tear down
 
 ```bash
-aws cloudformation delete-stack --stack-name sentinel-trader --region us-east-1
+aws cloudformation delete-stack --stack-name sentinel-trader --region eu-west-1
 ```
 
 The ECR repository is managed separately — delete it manually if needed:
 
 ```bash
-aws ecr delete-repository --repository-name sentinel-trader --force --region us-east-1
+aws ecr delete-repository --repository-name sentinel-trader --force --region eu-west-1
 ```
 
 ---
@@ -195,7 +195,7 @@ Approve the IBKR Mobile 2FA notification when prompted.
 aws acm request-certificate \
   --domain-name trading.example.com \
   --validation-method DNS \
-  --region us-east-1
+  --region eu-west-1
 ```
 
 Add the CNAME validation record to Route 53 and wait for `ISSUED` status.
@@ -207,12 +207,12 @@ aws cloudformation deploy \
   --template-file infra/cloudformation-production.yml \
   --stack-name sentinel-trader-prod \
   --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-1 \
+  --region eu-west-1 \
   --parameter-overrides \
     ImageUri=<ecr-image-uri> \
     DomainName=trading.example.com \
     HostedZoneId=Z1PA6795UKMFR9 \
-    AcmCertificateArn=arn:aws:acm:us-east-1:123456789:certificate/abc-123 \
+    AcmCertificateArn=arn:aws:acm:eu-west-1:123456789:certificate/abc-123 \
     TwsUserId=$TWS_USERID \
     TwsPassword=$TWS_PASSWORD \
     TradingMode=paper \
@@ -224,7 +224,7 @@ Access at: `https://trading.example.com`
 
 ---
 
-## Cost Estimate (Plan B, us-east-1)
+## Cost Estimate (Plan B, eu-west-1)
 
 | Resource | Cost |
 |---|---|

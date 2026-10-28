@@ -9,7 +9,7 @@ Description: >
 Parameters:
   ImageUri:
     Type: String
-    Description: Full ECR image URI (e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/sentinel-trader:latest)
+    Description: Full ECR image URI (e.g. 123456789.dkr.ecr.eu-west-1.amazonaws.com/sentinel-trader:latest)
 
   TelegramBotToken:
     Type: String

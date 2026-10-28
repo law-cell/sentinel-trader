@@ -7,7 +7,7 @@
 #   - jq installed (brew install jq / apt install jq)
 #
 # Usage:
-#   export AWS_REGION=us-east-1
+#   export AWS_REGION=eu-west-1
 #   export TELEGRAM_BOT_TOKEN=<token>
 #   export TELEGRAM_CHAT_ID=<chat_id>
 #   cd infra && bash deploy.sh
